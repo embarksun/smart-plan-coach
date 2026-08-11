@@ -73,6 +73,16 @@
   .chk.on{background:var(--pri);}
   .task .tx{flex:1;font-size:14px;}
   .task.done .tx{text-decoration:line-through;color:var(--sub);}
+  .task-actions{display:flex;gap:4px;flex:0 0 auto;}
+  .mini{width:26px;height:26px;border:none;border-radius:7px;background:var(--soft);color:#5b6cff;font-size:13px;cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0;}
+  .mini.del{color:#ef4444;}
+  .mini:active{transform:scale(.92);}
+  .tx-edit{width:100%;font-size:14px;padding:6px 8px;border:1px solid var(--pri);border-radius:8px;outline:none;font-family:inherit;}
+  .btn-sm{font-size:12px;padding:6px 10px;}
+  .edit-row{display:flex;gap:6px;align-items:center;margin-bottom:6px;}
+  .er-input{flex:1;padding:8px 10px;border:1px solid var(--line);border-radius:8px;font-size:13px;font-family:inherit;outline:none;}
+  .er-input:focus{border-color:var(--pri);}
+  .er-del{width:30px;height:30px;border:none;border-radius:8px;background:var(--soft);color:#ef4444;font-size:16px;cursor:pointer;flex:0 0 auto;}
   .ph{font-size:10px;padding:1px 6px;border-radius:8px;background:var(--soft);color:var(--sub);margin-left:6px;}
   .ph.week{background:#fff3d6;color:#a9780a;}
   .ph.month{background:#e4ecff;color:#3a63d8;}
@@ -232,6 +242,8 @@ function milestones(goal){
 }
 function uid(){return Date.now().toString(36)+Math.random().toString(36).slice(2,7);}
 function makeTask(planId,date,text,phase){return {id:uid(),planId,text,date,phase:phase||'day',done:false};}
+function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+function escapeAttr(s){return String(s).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
 
 function ensureDay(date){
   S.plans.forEach(p=>{
@@ -258,9 +270,12 @@ function getAll(date){return S.tasks[date]||[];}
 function ensureToday(){ensureDay(todayStr());}
 
 /* ============ 计划 ============ */
-function createPlan(name,category,mode,goal){
-  const p={id:uid(),name,category,mode,templates:pickTemplates(goal),ms:milestones(goal),
-    goal,todayCount:MODES[mode].base,createdAt:todayStr(),color:pickColor()};
+function createPlan(name,category,mode,goal,templates,ms){
+  const tpl=(templates&&templates.length)?templates:pickTemplates(goal);
+  const m=(ms&&ms.length)?ms:milestones(goal);
+  const count=(templates&&templates.length)?Math.min(10,Math.max(1,templates.length)):MODES[mode].base;
+  const p={id:uid(),name,category,mode,templates:tpl,ms:m,
+    goal,todayCount:count,createdAt:todayStr(),color:pickColor()};
   S.plans.push(p);save();ensureDay(todayStr());
 }
 function pickColor(){const c=['#5b6cff','#22c55e','#f59e0b','#ef4444','#8a5bff','#06b6d4','#ec4899'];return c[S.plans.length%c.length];}
@@ -466,8 +481,13 @@ function renderToday(){
         const ph=t.phase==='week'?'<span class="ph week">周</span>':t.phase==='month'?'<span class="ph month">月</span>':'';
         html+=`<div class="task ${t.done?'done':''}" data-action="toggle" data-id="${t.id}" data-date="${d}">
           <div class="chk ${t.done?'on':''}">${t.done?'✓':''}</div>
-          <div class="tx">${t.text}${ph}</div></div>`;
+          <div class="tx">${esc(t.text)}${ph}</div>
+          <div class="task-actions">
+            <button class="mini" data-action="edit-task" data-id="${t.id}" data-date="${d}" title="修改">✎</button>
+            <button class="mini del" data-action="del-task" data-id="${t.id}" data-date="${d}" title="删除">🗑</button>
+          </div></div>`;
       });
+      html+=`<button class="btn btn-ghost btn-sm" data-action="add-task" data-plan="${p.id}" style="margin-top:6px;">＋ 添加今日任务</button>`;
       html+=`</div>`;
     });
   }
@@ -490,9 +510,9 @@ function renderPlans(){
     const pp=ptot?Math.round(pd/ptot*100):0;
     html+=`<div class="card plan" style="--c:${p.color}">
       <div class="pi">
-        <div class="pn">${p.name}</div>
+        <div class="pn">${esc(p.name)}</div>
         <div class="pm"><span class="badge ${MODES[p.mode].cls}">${MODES[p.mode].label}</span><span class="badge">${p.category}</span></div>
-        <div class="pp">🎯 ${p.goal}</div>
+        <div class="pp">🎯 ${esc(p.goal)}</div>
         <div class="pp">当前日任务量：${p.todayCount}</div>
         <div class="progress"><i style="width:${pp}%"></i></div>
       </div>
@@ -611,33 +631,84 @@ document.addEventListener('click',e=>{
   if(a==='exchange'){const c=Number(el.dataset.cost);const ex=EXCHANGES.find(x=>x.cost===c);doExchange(ex);return;}
   if(a==='sel-title'){S.selTitle=el.dataset.title;save();render();toast('已设为展示称号');return;}
   if(a==='reset'){if(confirm('确定清空全部数据？此操作不可恢复！')){localStorage.removeItem(KEY);S=defState();save();render();toast('已重置');}return;}
+  if(a==='edit-task'){
+    const id=el.dataset.id,d=el.dataset.date;
+    const t=(S.tasks[d]||[]).find(x=>x.id===id);if(!t)return;
+    const tx=el.closest('.task').querySelector('.tx');
+    tx.innerHTML=`<input class="tx-edit" value="${escapeAttr(t.text)}"><button class="mini" data-action="save-task" data-id="${id}" data-date="${d}">✓</button>`;
+    tx.querySelector('input').focus();return;
+  }
+  if(a==='save-task'){
+    const id=el.dataset.id,d=el.dataset.date;
+    const inp=el.closest('.tx').querySelector('input');
+    const t=(S.tasks[d]||[]).find(x=>x.id===id);
+    if(t&&inp){t.text=inp.value.trim()||t.text;save();}
+    renderToday();return;
+  }
+  if(a==='del-task'){
+    const id=el.dataset.id,d=el.dataset.date;
+    S.tasks[d]=(S.tasks[d]||[]).filter(x=>x.id!==id);save();renderToday();return;
+  }
+  if(a==='add-task'){
+    const pid=el.dataset.plan,d=todayStr();
+    S.tasks[d]=S.tasks[d]||[];
+    S.tasks[d].push(makeTask(pid,d,'新任务','day'));save();renderToday();return;
+  }
 });
 document.querySelectorAll('.nav button').forEach(b=>b.addEventListener('click',()=>{view=b.dataset.view;render();}));
 
 function openPlanModal(){
-  openModal(`<h3>🤖 AI 拆解目标</h3><div class="sub">输入目标，自动生成月/周/日任务</div>
+  openModal(`<h3>🤖 AI 拆解目标</h3><div class="sub">输入目标，自动生成任务，生成后你可自由增删改</div>
     <div class="field"><label>计划名称</label><input id="pName" placeholder="如：30天减脂计划"></div>
     <div class="field"><label>目标 / 关键词</label><textarea id="pGoal" rows="2" placeholder="如：健身减脂、备考雅思、完成产品上线"></textarea></div>
     <div class="field"><label>分类</label>
       <select id="pCat"><option>健身</option><option>学习</option><option>工作</option><option>其他</option></select></div>
     <div class="field"><label>挑战模式</label>
       <div class="seg" id="pMode">
-        <button data-m="A" class="sel">激进<br><small>日任务多</small></button>
+        <button data-m="A" class="sel">激进<br><small>任务偏多</small></button>
         <button data-m="B">稳健<br><small>适中</small></button>
         <button data-m="C">保守<br><small>少而精</small></button>
       </div></div>
     <div class="hint">📌 系统将根据完成率自动调整每日任务量：≥80%加量、50-80%持平、<50%减量。</div>
-    <button class="btn btn-pri" id="savePlan">✨ 生成计划</button>`);
+    <button class="btn btn-pri" id="genPlan">✨ AI 生成任务草稿</button>`);
   let mode='A';
   $('modal').querySelectorAll('#pMode button').forEach(btn=>btn.addEventListener('click',()=>{
     $('modal').querySelectorAll('#pMode button').forEach(b=>b.classList.remove('sel'));btn.classList.add('sel');mode=btn.dataset.m;
   }));
-  $('savePlan').addEventListener('click',()=>{
-    const name=$('pName').value.trim()||'我的计划';
-    const goal=$('pGoal').value.trim()||name;
-    const cat=$('pCat').value;
-    createPlan(name,cat,mode,goal);closeModal();view='plans';render();
-    toast('计划已生成 🎉');
+  $('genPlan').addEventListener('click',()=>{
+    const name=$('pName').value.trim();
+    const goal=$('pGoal').value.trim()||name||'我的目标';
+    showPlanDraft(name,goal,$('pCat').value,mode);
+  });
+}
+function showPlanDraft(name,goal,cat,mode){
+  const base=MODES[mode].base;
+  const dailies=pickTemplates(goal).slice(0,base);
+  const mss=milestones(goal);
+  const row=(arr)=>arr.map(t=>`<div class="edit-row"><input class="er-input" value="${escapeAttr(t)}"><button class="er-del" title="删除">×</button></div>`).join('');
+  openModal(`<h3>📝 调整你的任务</h3><div class="sub">AI 已生成草稿，可自由修改、增删每一项后再创建</div>
+    <div class="field"><label>每日任务（完成后系统按完成率自动调整数量）</label>
+      <div id="dailies">${row(dailies)}</div>
+      <button class="btn btn-ghost btn-sm" id="addDay">＋ 添加每日任务</button>
+    </div>
+    <div class="field"><label>周 / 月里程碑</label>
+      <div id="mslist">${row(mss)}</div>
+      <button class="btn btn-ghost btn-sm" id="addMs">＋ 添加里程碑</button>
+    </div>
+    <div class="hint">💡 改成你真正想做的事；删除会减少该计划任务量，添加可自定义专属事项。</div>
+    <div style="display:flex;gap:8px;margin-top:6px;">
+      <button class="btn btn-ghost" id="backStep">← 返回</button>
+      <button class="btn btn-pri" id="confirmPlan" style="flex:1;">✅ 确认创建计划</button>
+    </div>`);
+  const read=id=>Array.from($('modal').querySelectorAll('#'+id+' .er-input')).map(i=>i.value.trim()).filter(Boolean);
+  $('addDay').addEventListener('click',()=>{$('dailies').insertAdjacentHTML('beforeend',`<div class="edit-row"><input class="er-input" value=""><button class="er-del" title="删除">×</button></div>`);});
+  $('addMs').addEventListener('click',()=>{$('mslist').insertAdjacentHTML('beforeend',`<div class="edit-row"><input class="er-input" value=""><button class="er-del" title="删除">×</button></div>`);});
+  $('modal').querySelectorAll('.er-del').forEach(b=>b.addEventListener('click',()=>b.closest('.edit-row').remove()));
+  $('backStep').addEventListener('click',()=>openPlanModal());
+  $('confirmPlan').addEventListener('click',()=>{
+    const dl=read('dailies'),ms=read('mslist');
+    if(!dl.length){toast('请至少保留一项每日任务');return;}
+    createPlan(name||goal,cat,mode,goal,dl,ms);closeModal();view='plans';render();toast('计划已生成 🎉');
   });
 }
 function loadDemo(){
