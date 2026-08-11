@@ -241,7 +241,7 @@ function milestones(goal){
   return ['第1周：建立基础与习惯','第2周：稳步积累','第3周：突破瓶颈','第4周：巩固与冲刺'];
 }
 function uid(){return Date.now().toString(36)+Math.random().toString(36).slice(2,7);}
-function makeTask(planId,date,text,phase){return {id:uid(),planId,text,date,phase:phase||'day',done:false};}
+function makeTask(planId,date,text,phase,tplIdx,ms){return {id:uid(),planId,text,date,phase:phase||'day',done:false,tplIdx:(tplIdx===undefined?null:tplIdx),ms:!!ms};}
 function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
 function escapeAttr(s){return String(s).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
 
@@ -252,15 +252,17 @@ function ensureDay(date){
     let count=p.todayCount;
     if(S.halfDayDates.includes(date)) count=Math.max(1,Math.ceil(count/2));
     const tpl=p.templates, list=[];
-    for(let i=0;i<count;i++) list.push(makeTask(p.id,date,tpl[i%tpl.length],'day'));
+    if(tpl.length){
+      for(let i=0;i<count;i++) list.push(makeTask(p.id,date,tpl[i%tpl.length],'day',i%tpl.length));
+    }
     const dt=new Date(date+'T00:00:00');
     if(dt.getDay()===1){ // Monday -> weekly milestone
       const wi=weekIndexSince(p.createdAt,date);
-      list.push(makeTask(p.id,date,p.ms[wi%p.ms.length],'week'));
+      list.push(makeTask(p.id,date,p.ms[wi%p.ms.length],'week',wi%p.ms.length,true));
     }
     if(date.endsWith('-01')){ // month start -> monthly milestone
       const mi=Math.floor((new Date(date+'T00:00:00')-new Date(p.createdAt+'T00:00:00'))/86400000/30);
-      list.push(makeTask(p.id,date,p.ms[mi%p.ms.length],'month'));
+      list.push(makeTask(p.id,date,p.ms[mi%p.ms.length],'month',mi%p.ms.length,true));
     }
     S.tasks[date]=(S.tasks[date]||[]).concat(list);
   });
@@ -487,7 +489,7 @@ function renderToday(){
             <button class="mini del" data-action="del-task" data-id="${t.id}" data-date="${d}" title="删除">🗑</button>
           </div></div>`;
       });
-      html+=`<button class="btn btn-ghost btn-sm" data-action="add-task" data-plan="${p.id}" style="margin-top:6px;">＋ 添加今日任务</button>`;
+      html+=`<button class="btn btn-ghost btn-sm" data-action="add-task" data-plan="${p.id}" style="margin-top:6px;">＋ 添加任务（每天同步）</button>`;
       html+=`</div>`;
     });
   }
@@ -642,17 +644,45 @@ document.addEventListener('click',e=>{
     const id=el.dataset.id,d=el.dataset.date;
     const inp=el.closest('.tx').querySelector('input');
     const t=(S.tasks[d]||[]).find(x=>x.id===id);
-    if(t&&inp){t.text=inp.value.trim()||t.text;save();}
+    if(t&&inp){
+      const v=inp.value.trim();
+      if(v){
+        t.text=v;
+        const p=planById(t.planId);
+        if(p){
+          if(t.ms){ if(p.ms[t.tplIdx]!==undefined) p.ms[t.tplIdx]=v; }
+          else if(t.tplIdx!=null && p.templates[t.tplIdx]!==undefined) p.templates[t.tplIdx]=v;
+        }
+        save();
+      }
+    }
     renderToday();return;
   }
   if(a==='del-task'){
     const id=el.dataset.id,d=el.dataset.date;
-    S.tasks[d]=(S.tasks[d]||[]).filter(x=>x.id!==id);save();renderToday();return;
+    const t=(S.tasks[d]||[]).find(x=>x.id===id);
+    const p=t?planById(t.planId):null;
+    S.tasks[d]=(S.tasks[d]||[]).filter(x=>x.id!==id);
+    // 删除常态化任务：同步从模板移除，避免明天再次出现（里程碑仅删当天，不影响周/月索引）
+    if(p&&t&&!t.ms&&t.tplIdx!=null&&p.templates[t.tplIdx]!==undefined){
+      p.templates.splice(t.tplIdx,1);
+      (S.tasks[d]||[]).forEach(x=>{ if(x.planId===p.id&&!x.ms&&x.tplIdx!=null&&x.tplIdx>t.tplIdx)x.tplIdx--; });
+      if(p.todayCount>p.templates.length)p.todayCount=p.templates.length;
+    }
+    save();renderToday();return;
   }
   if(a==='add-task'){
     const pid=el.dataset.plan,d=todayStr();
-    S.tasks[d]=S.tasks[d]||[];
-    S.tasks[d].push(makeTask(pid,d,'新任务','day'));save();renderToday();return;
+    const p=planById(pid);
+    const txt=prompt('添加一条常态化任务（将同步到每天）：','');
+    if(p&&txt&&txt.trim()){
+      p.templates.push(txt.trim());
+      p.todayCount=Math.min(10,Math.max(p.todayCount,p.templates.length));
+      S.tasks[d]=S.tasks[d]||[];
+      S.tasks[d].push(makeTask(pid,d,txt.trim(),'day',p.templates.length-1));
+      save();
+    }
+    renderToday();return;
   }
 });
 document.querySelectorAll('.nav button').forEach(b=>b.addEventListener('click',()=>{view=b.dataset.view;render();}));
