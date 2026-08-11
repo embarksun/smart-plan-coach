@@ -4,6 +4,9 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>智能计划教练</title>
+<meta name="theme-color" content="#5b6cff">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icon-192.png">
 <style>
   :root{
     --bg:#eef1f6; --card:#ffffff; --ink:#1f2430; --sub:#7a8194;
@@ -644,6 +647,13 @@ function loadDemo(){
   createPlan('产品上线冲刺','工作','C','项目开发 产品上线 写作');
   ensureDay(todayStr());
   toast('示例计划已载入');
+}
+
+/* ============ PWA Service Worker 注册 ============ */
+if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('sw.js').catch(() => {});
+  });
 }
 
 /* ============ 启动 ============ */

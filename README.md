@@ -18,11 +18,24 @@
 
 直接用浏览器打开 `index.html` 即可。建议首次点击「载入示例计划」体验。
 
-## 部署为网页
+## 部署为网页 / 安装为 App（PWA）
 
-1. 在仓库 **Settings → Pages → Source** 选择 `main` / `root`，保存后即可获得在线访问地址：
-   `https://embarksun.github.io/smart-plan-coach/`
-2. 也可以直接用 GitHub Pages、任意静态托管或本地打开 `index.html`。
+本项目已是 **PWA（渐进式 Web 应用）**，可像原生 App 一样"安装"到手机和电脑。
+
+**生成图标**（如需重新生成）：
+```
+node tools/gen-icons.js
+```
+
+**开启在线访问（GitHub Pages）**：
+1. 仓库 **Settings → Pages → Source** 选择 `main` / `root`，保存。
+2. 获得地址：`https://embarksun.github.io/smart-plan-coach/`
+
+**安装为 App：**
+- **手机（推荐）**：用 Chrome / Safari 打开上面的网址 → 菜单 →「添加到主屏幕」。即出现带图标的全屏 App。
+- **电脑**：用 Chrome / Edge 打开网址 → 地址栏右侧「安装」图标（或菜单 → 安装应用）。即变成独立窗口应用。
+
+> 注意：数据保存在各浏览器自身的 localStorage 中，手机与电脑的存档互不同步。
 
 ## 技术
 
