@@ -43,7 +43,7 @@ function makeIcon(size, maskable) {
     const i = (y * size + x) * 4;
     buf[i] = r; buf[i + 1] = g; buf[i + 2] = b; buf[i + 3] = a;
   };
-  const top = [124, 108, 240], bot = [33, 199, 168];
+  const top = [26, 35, 50], bot = [36, 58, 92];
   const grad = (y) => {
     const t = y / size;
     return [Math.round(top[0] + (bot[0] - top[0]) * t),
@@ -75,7 +75,7 @@ function makeIcon(size, maskable) {
   const t = size * (maskable ? 0.05 : 0.07);
   for (let y = 0; y < size; y++) for (let x = 0; x < size; x++) {
     const d = Math.hypot(x - cx, y - cy);
-    if (Math.abs(d - R) <= t / 2) set(x, y, 255, 255, 255, 255);
+    if (Math.abs(d - R) <= t / 2) set(x, y, 78, 168, 255, 255);
   }
   // 对勾两段
   const thick = (x0, y0, x1, y1, wdt) => {
@@ -83,7 +83,7 @@ function makeIcon(size, maskable) {
     for (let s = 0; s <= steps; s++) {
       const px = x0 + (x1 - x0) * s / steps, py = y0 + (y1 - y0) * s / steps;
       for (let oy = -wdt; oy <= wdt; oy++) for (let ox = -wdt; ox <= wdt; ox++)
-        if (Math.hypot(ox, oy) <= wdt) set(Math.round(px + ox), Math.round(py + oy), 255, 255, 255, 255);
+        if (Math.hypot(ox, oy) <= wdt) set(Math.round(px + ox), Math.round(py + oy), 232, 237, 245, 255);
     }
   };
   const s2 = R * 0.52, wdt = Math.max(2, Math.round(size * 0.045));
@@ -92,8 +92,73 @@ function makeIcon(size, maskable) {
   return buf;
 }
 
-const out = path.join(__dirname, '..');
-fs.writeFileSync(path.join(out, 'icon-192.png'), encodePNG(192, 192, makeIcon(192, false)));
-fs.writeFileSync(path.join(out, 'icon-512.png'), encodePNG(512, 512, makeIcon(512, false)));
-fs.writeFileSync(path.join(out, 'icon-maskable-512.png'), encodePNG(512, 512, makeIcon(512, true)));
-console.log('icons generated: icon-192.png, icon-512.png, icon-maskable-512.png');
+function rgbaToBmpIcon(size, rgba) {
+  const xor = Buffer.alloc(size * size * 4);
+  for (let y = 0; y < size; y++) {
+    const srcY = size - 1 - y;
+    for (let x = 0; x < size; x++) {
+      const si = (srcY * size + x) * 4;
+      const di = (y * size + x) * 4;
+      xor[di] = rgba[si + 2];
+      xor[di + 1] = rgba[si + 1];
+      xor[di + 2] = rgba[si];
+      xor[di + 3] = rgba[si + 3];
+    }
+  }
+  const andRow = Math.ceil(size / 32) * 4;
+  const andMask = Buffer.alloc(andRow * size);
+  const dib = Buffer.alloc(40);
+  dib.writeUInt32LE(40, 0);
+  dib.writeInt32LE(size, 4);
+  dib.writeInt32LE(size * 2, 8);
+  dib.writeUInt16LE(1, 12);
+  dib.writeUInt16LE(32, 14);
+  dib.writeUInt32LE(0, 16);
+  dib.writeUInt32LE(xor.length + andMask.length, 20);
+  return Buffer.concat([dib, xor, andMask]);
+}
+
+function bmpImagesToIco(items) {
+  const header = Buffer.alloc(6);
+  header.writeUInt16LE(0, 0);
+  header.writeUInt16LE(1, 2);
+  header.writeUInt16LE(items.length, 4);
+  const entries = [];
+  const images = [];
+  let offset = 6 + 16 * items.length;
+  for (const { size, buf } of items) {
+    const entry = Buffer.alloc(16);
+    entry[0] = size < 256 ? size : 0;
+    entry[1] = size < 256 ? size : 0;
+    entry.writeUInt16LE(1, 4);
+    entry.writeUInt16LE(32, 6);
+    entry.writeUInt32LE(buf.length, 8);
+    entry.writeUInt32LE(offset, 12);
+    entries.push(entry);
+    images.push(buf);
+    offset += buf.length;
+  }
+  return Buffer.concat([header, ...entries, ...images]);
+}
+
+function generateAll() {
+  const out = path.join(__dirname, '..');
+  fs.writeFileSync(path.join(out, 'icon-192.png'), encodePNG(192, 192, makeIcon(192, false)));
+  fs.writeFileSync(path.join(out, 'icon-512.png'), encodePNG(512, 512, makeIcon(512, false)));
+  fs.writeFileSync(path.join(out, 'icon-maskable-512.png'), encodePNG(512, 512, makeIcon(512, true)));
+
+  const buildDir = path.join(out, 'build');
+  fs.mkdirSync(buildDir, { recursive: true });
+  fs.writeFileSync(path.join(buildDir, 'icon.png'), encodePNG(512, 512, makeIcon(512, false)));
+  // 小尺寸用 BMP，256 用 PNG（rcedit 无法写入 256x256 BMP ICO）
+  fs.writeFileSync(path.join(buildDir, 'icon.ico'), bmpImagesToIco([
+    { size: 16, buf: rgbaToBmpIcon(16, makeIcon(16, false)) },
+    { size: 32, buf: rgbaToBmpIcon(32, makeIcon(32, false)) },
+    { size: 48, buf: rgbaToBmpIcon(48, makeIcon(48, false)) },
+    { size: 256, buf: encodePNG(256, 256, makeIcon(256, false)) }
+  ]));
+  console.log('icons generated: icon-192.png, icon-512.png, icon-maskable-512.png, build/icon.png, build/icon.ico');
+}
+
+module.exports = { makeIcon, encodePNG, rgbaToBmpIcon, bmpImagesToIco };
+if (require.main === module) generateAll();

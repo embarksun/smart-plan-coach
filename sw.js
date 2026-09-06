@@ -1,4 +1,4 @@
-const CACHE = 'spc-v1';
+const CACHE = 'spc-v3';
 const ASSETS = [
   './',
   './index.html',
@@ -10,7 +10,9 @@ const ASSETS = [
 
 self.addEventListener('install', (e) => {
   e.waitUntil(
-    caches.open(CACHE).then((c) => c.addAll(ASSETS)).then(() => self.skipWaiting())
+    caches.open(CACHE).then((c) =>
+      Promise.all(ASSETS.map((url) => c.add(url).catch(() => {})))
+    ).then(() => self.skipWaiting())
   );
 });
 
@@ -24,11 +26,16 @@ self.addEventListener('activate', (e) => {
 
 self.addEventListener('fetch', (e) => {
   if (e.request.method !== 'GET') return;
+  let url;
+  try { url = new URL(e.request.url); } catch (err) { return; }
+  if (url.origin !== self.location.origin) return;
   e.respondWith(
     caches.match(e.request).then((cached) => {
       const network = fetch(e.request).then((resp) => {
-        const copy = resp.clone();
-        caches.open(CACHE).then((c) => c.put(e.request, copy));
+        if (resp && resp.ok && resp.type === 'basic') {
+          const copy = resp.clone();
+          caches.open(CACHE).then((c) => c.put(e.request, copy)).catch(() => {});
+        }
         return resp;
       }).catch(() => cached);
       return cached || network;

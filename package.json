@@ -1,0 +1,77 @@
+{
+  "name": "smart-plan-coach",
+  "productName": "智能计划教练",
+  "version": "1.0.0",
+  "description": "陪你执行计划，根据每日完成率动态调整次日强度",
+  "main": "electron/main.js",
+  "author": "Smart Plan Coach",
+  "license": "MIT",
+  "scripts": {
+    "start": "electron .",
+    "icons": "node tools/gen-icons.js",
+    "pack": "electron-builder --win --dir",
+    "dist": "electron-builder --win"
+  },
+  "devDependencies": {
+    "electron": "^33.4.11",
+    "electron-builder": "^25.1.8"
+  },
+  "build": {
+    "appId": "com.smartplancoach.app",
+    "productName": "智能计划教练",
+    "copyright": "Copyright © 2026 Smart Plan Coach",
+    "asar": true,
+    "afterPack": "./tools/afterPack.js",
+    "directories": {
+      "output": "release",
+      "buildResources": "build"
+    },
+    "files": [
+      "index.html",
+      "icon-192.png",
+      "icon-512.png",
+      "icon-maskable-512.png",
+      "manifest.webmanifest",
+      "electron/**/*"
+    ],
+    "extraFiles": [
+      {
+        "from": "app-config.example.json",
+        "to": "app-config.example.json"
+      }
+    ],
+    "win": {
+      "icon": "build/icon.ico",
+      "executableName": "SmartPlanCoach",
+      "signAndEditExecutable": false,
+      "artifactName": "SmartPlanCoach-${version}-${os}-${arch}.${ext}",
+      "target": [
+        {
+          "target": "nsis",
+          "arch": ["x64"]
+        },
+        {
+          "target": "portable",
+          "arch": ["x64"]
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "allowElevation": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "智能计划教练",
+      "installerIcon": "build/icon.ico",
+      "uninstallerIcon": "build/icon.ico",
+      "installerLanguages": ["zh_CN", "en_US"],
+      "unicode": true,
+      "artifactName": "SmartPlanCoach-Setup-${version}.${ext}"
+    },
+    "portable": {
+      "artifactName": "SmartPlanCoach-${version}-portable.${ext}"
+    }
+  }
+}

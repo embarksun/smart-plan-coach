@@ -37,6 +37,20 @@ node tools/gen-icons.js
 
 > 注意：数据保存在各浏览器自身的 localStorage 中，手机与电脑的存档互不同步。
 
+## Windows 桌面版（Electron）
+
+```
+npm install
+npm run dist
+```
+
+产物在 `release/`：
+
+- `SmartPlanCoach-Setup-1.0.0.exe`：安装向导，可自选安装目录（例如 E 盘）
+- `SmartPlanCoach-1.0.0-portable.exe`：绿色便携版
+
+用户数据默认在 `%APPDATA%\SmartPlanCoach`。便携版数据在 exe 同目录的 `SmartPlanCoach-data`。若要改到 E 盘，把安装目录中的 `app-config.example.json` 复制为 `app-config.json`，设置 `"userData": "E:\\SmartPlanCoach\\data"` 后重启。
+
 ## 技术
 
 单文件 HTML（内嵌 CSS + JS），无任何外部依赖。

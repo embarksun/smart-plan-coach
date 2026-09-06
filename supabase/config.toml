@@ -1,0 +1,5 @@
+# Supabase 本地/部署配置
+# 浏览器静态页调用时建议 verify_jwt = false，或在前端携带 anon key
+
+[functions.deepseek-proxy]
+verify_jwt = false
