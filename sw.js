@@ -1,4 +1,4 @@
-const CACHE = 'spc-v3';
+const CACHE = 'spc-v4';
 const ASSETS = [
   './',
   './index.html',
@@ -29,16 +29,15 @@ self.addEventListener('fetch', (e) => {
   let url;
   try { url = new URL(e.request.url); } catch (err) { return; }
   if (url.origin !== self.location.origin) return;
+  const html = e.request.mode === 'navigate' || url.pathname.endsWith('.html') || url.pathname.endsWith('/');
   e.respondWith(
-    caches.match(e.request).then((cached) => {
-      const network = fetch(e.request).then((resp) => {
+    (html ? fetch(e.request) : caches.match(e.request).then((cached) => cached || fetch(e.request)))
+      .then((resp) => {
         if (resp && resp.ok && resp.type === 'basic') {
           const copy = resp.clone();
           caches.open(CACHE).then((c) => c.put(e.request, copy)).catch(() => {});
         }
         return resp;
-      }).catch(() => cached);
-      return cached || network;
-    })
+      }).catch(() => caches.match(e.request))
   );
 });

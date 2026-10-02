@@ -237,6 +237,19 @@ svg text{font-family:inherit;fill:var(--sub);}
 .log-item{font-size:12px;color:var(--sub);padding:6px 0;border-bottom:1px solid var(--line);}
 .task.skip .tn{opacity:.65;}
 .task.skip{opacity:.88;}
+.task-edit{margin-bottom:8px;}
+.er-subs{width:100%;margin-top:4px;}
+.subtasks{margin:4px 0 0 34px;}
+.subtask{display:flex;align-items:flex-start;gap:8px;padding:4px 0;font-size:13px;}
+.subtask .stxt{flex:1;min-width:0;}
+.subtask.done .stxt{text-decoration:line-through;color:var(--sub);}
+.chk.sm{width:18px;height:18px;border-radius:6px;font-size:11px;margin-top:1px;}
+.fb-line{margin:0 0 4px 34px;font-size:12px;color:#9fd0ff;}
+.plan-tabs{display:flex;gap:8px;margin-bottom:12px;}
+.plan-tabs button{flex:1;}
+.sum-block{font-size:13px;white-space:pre-wrap;line-height:1.65;}
+.pending-banner{background:rgba(124,140,255,.14);color:#c9d0ff;border:1px solid rgba(124,140,255,.35);
+  border-radius:12px;padding:12px;font-size:13px;margin-bottom:12px;}
 </style>
 </head>
 <body>
@@ -273,7 +286,7 @@ svg text{font-family:inherit;fill:var(--sub);}
 <script src="https://cdn.jsdelivr.net/npm/mammoth@1.11.0/mammoth.browser.min.js" onerror="window.__mammothFailed=1"></script>
 <script>
 /* ============ DeepSeek API 配置 ============ */
-const DEEPSEEK_API_KEY=''; // 在此填入你的 DeepSeek API Key
+const DEEPSEEK_API_KEY=''; // 留空。Key 只在设置页填写，不要写进安装包。
 const DEEPSEEK_API_URL='https://api.deepseek.com/v1/chat/completions';
 
 /* ============ 常量 ============ */
@@ -313,17 +326,14 @@ const EXCHANGES=[
 ];
 const COLORS=['#4ea8ff','#3dd68c','#f0b429','#f07178','#a78bfa','#22d3ee','#fb7185'];
 const TASK_TYPES=['学习','运动','工作','生活','其他'];
-const TYPE_SWAP={
-  学习:['精读核心材料','做限时练习','复盘错题','输出一段总结','听力或口语跟读'],
-  运动:['力量主项','有氧间歇','核心稳定','拉伸放松','步行补齐步数'],
-  工作:['推进关键交付','处理阻塞沟通','整理进度清单','拆解下一项','复盘决策'],
-  生活:['整理环境','健康习惯打卡','深度休息准备','记录心情与精力','为明日做最小准备'],
-  其他:['推进核心事项','完成一项可交付结果','复盘进展','补充相关学习','为明日做准备']
-};
+const PROMPT_COACH='你是一个专业的个性化计划教练。请根据用户的具体目标、可用时间、当前基础，生成详尽的月/周/日计划。任务必须具体、可量化、可执行，不要套用固定模板。';
+const PROMPT_ADJUST='请根据用户今日完成率、任务质量、用户感想，重新生成明日具体任务。如果用户遇到困难，请调整任务难度或拆分任务；如果用户完成得很好，可适度增加挑战。';
+const PROMPT_FEEDBACK='请根据用户的完成数据、自我总结、任务反馈，生成一段真诚、具体、有建设性的反馈。指出进步和不足，并给出下一步建议。';
+const TASK_LINE_RULE='每条任务一行，格式严格为：任务名称 | 分钟 | P0或P1或P2 | 难度1-5 | 类型 | 子项1；子项2；子项3。类型只能是学习/运动/工作/生活/其他。任务名称必须写出对象、动作和可核对的完成标准。禁止只写“学习1小时”“运动30分钟”这类空泛任务。每个任务给2到4个可单独打勾的子项。';
 
 /* ============ 状态 ============ */
 function defState(){return{
-  version:4,points:0,titles:['🌱 新手启程'],selTitle:null,achievements:[],
+  version:5,points:0,titles:['🌱 新手启程'],selTitle:null,achievements:[],
   plans:[],tasks:{},settlements:{},restDates:{},changeLogs:{},
   weeklyDone:[],monthlyDone:[],weeklyAvg:{},monthlyAvg:{},
   stats:{perfectStreak:0,targetStreak:0,weeklyStreak:0,monthlyStreak:0,
@@ -331,11 +341,16 @@ function defState(){return{
   lastWeek:null,lastMonth:null,exLog:[],
   settings:{apiKey:'',proxyUrl:''},
   incentives:[],
-  rewardEngine:{totalCompleted:0,lastCountMilestone:0,weekEngine:{},monthEngine:{}}
+  rewardEngine:{totalCompleted:0,lastCountMilestone:0,weekEngine:{},monthEngine:{}},
+  dailyFeedback:{},
+  taskFeedback:{},
+  weeklySummary:{},
+  monthlySummary:{},
+  pendingNextDay:null
 };}
 let S, view='home', lastPts=null, rewardsTab='center', incSearch='', incTypeFilter='all';
-let pendingImport=null, detailPlanId=null, expandedWeek='';
-let dragTaskId=null, dragTaskDate=null;
+let pendingImport=null, detailPlanId=null, expandedWeek='', planTab='schedule';
+let dragTaskId=null, dragTaskDate=null, pendingRecommend=null;
 const TASK_ENGINE_PTS={P0:3,P1:2,P2:1};
 const $=id=>document.getElementById(id);
 
@@ -347,6 +362,11 @@ function load(){
   if(!S.settings)S.settings={apiKey:'',proxyUrl:''};
   if(!S.restDates)S.restDates={};
   if(!S.changeLogs||typeof S.changeLogs!=='object')S.changeLogs={};
+  if(!S.dailyFeedback||typeof S.dailyFeedback!=='object')S.dailyFeedback={};
+  if(!S.taskFeedback||typeof S.taskFeedback!=='object')S.taskFeedback={};
+  if(!S.weeklySummary||typeof S.weeklySummary!=='object')S.weeklySummary={};
+  if(!S.monthlySummary||typeof S.monthlySummary!=='object')S.monthlySummary={};
+  if(!('pendingNextDay' in S))S.pendingNextDay=null;
   if(!Array.isArray(S.plans))S.plans=[];
   if(!S.tasks||typeof S.tasks!=='object')S.tasks={};
   migrate();
@@ -369,7 +389,12 @@ function normalizeTaskFields(t,plan){
   if(t.skipped==null)t.skipped=false;
   if(t.extra==null)t.extra=false;
   if(t.order==null)t.order=0;
-  if(!t.source)t.source='template';
+  if(!t.source)t.source='coach';
+  if(!Array.isArray(t.subtasks))t.subtasks=[];
+  t.subtasks=t.subtasks.map(s=>{
+    if(typeof s==='string')return {id:uid(),text:s,done:false};
+    return {id:s.id||uid(),text:String(s.text||'').trim(),done:!!s.done};
+  }).filter(s=>s.text);
   return t;
 }
 function ensurePlanHierarchy(p){
@@ -378,13 +403,28 @@ function ensurePlanHierarchy(p){
   return p;
 }
 function migrate(){
-  S.version=4;
+  S.version=5;
+  S.plans=(S.plans||[]).filter(p=>p&&typeof p==='object');
   S.plans.forEach(p=>{
+    try{
+    if(!p.id)p.id=uid();
+    if(!p.name)p.name=p.title||p.goal||'未命名计划';
+    if(!p.goal)p.goal=p.desc||p.description||p.name;
+    if(!p.createdAt||!/^\d{4}-\d{2}-\d{2}$/.test(String(p.createdAt)))p.createdAt=todayStr();
     if(!p.status)p.status='active';
-    if(p.intensity==null)p.intensity=1;
+    if(p.intensity==null||isNaN(Number(p.intensity)))p.intensity=1;
     if(p.cycle==='年')p.cycle='一年';
+    if(!p.cycle)p.cycle='月';
+    if(!p.mode||!MODES[p.mode])p.mode='B';
+    if(!p.color)p.color=pickColor();
+    if(p.monthPlan&&!p.month_plan)p.month_plan=p.monthPlan;
+    if(p.weekPlan&&!p.week_plan)p.week_plan=p.weekPlan;
+    if(!p.profile||typeof p.profile!=='object')p.profile={dailyMinutes:60,foundation:'',preference:''};
+    p.profile.dailyMinutes=Math.max(15,parseInt(p.profile.dailyMinutes,10)||60);
+    p.profile.foundation=p.profile.foundation||'';
+    p.profile.preference=p.profile.preference||'';
     if(Array.isArray(p.templates)&&p.templates.length&&typeof p.templates[0]==='string'){
-      p.templates=p.templates.map(parseTaskLine);
+      p.templates=p.templates.map(parseTaskLine).filter(Boolean);
     }
     (p.templates||[]).forEach(t=>{
       if(t.name&&!t.text)t.text=t.name;
@@ -393,17 +433,28 @@ function migrate(){
     });
     ensurePlanHierarchy(p);
     refreshPlanStatus(p);
+    }catch(e){console.warn('计划兼容失败',p&&p.name,e);}
   });
+  if(!S.tasks||typeof S.tasks!=='object'||Array.isArray(S.tasks))S.tasks={};
   Object.keys(S.tasks).forEach(d=>{
-    (S.tasks[d]||[]).forEach((t,i)=>{
+    if(!Array.isArray(S.tasks[d])){delete S.tasks[d];return;}
+    S.tasks[d]=S.tasks[d].filter(t=>t&&typeof t==='object');
+    S.tasks[d].forEach((t,i)=>{
+      try{
+      if(!t.id)t.id=uid();
+      if(!t.text)t.text=t.name||t.content||t.title||'未命名任务';
+      if(!t.date)t.date=d;
       if(!t.status)t.status=t.done?'done':'none';
       if(/\|/.test(t.text||'')){
         const parsed=parseTaskLine(t.text);
+        if(parsed){
         t.text=parsed.name;
         if(!t.priority)t.priority=parsed.priority;
         if(!t.minutes)t.minutes=parsed.minutes;
         if(!t.difficulty)t.difficulty=parsed.difficulty;
         if(!t.type)t.type=parsed.type;
+        if(parsed.subtasks&&parsed.subtasks.length&&!(t.subtasks&&t.subtasks.length))t.subtasks=parsed.subtasks;
+        }
       }
       if(!t.priority){
         const m=String(t.text||'').match(/\b(P0|P1|P2)\b/i);
@@ -415,11 +466,33 @@ function migrate(){
       }
       if(t.order==null)t.order=i;
       normalizeTaskFields(t,planById(t.planId));
+      }catch(e){console.warn('任务兼容失败',d,e);}
     });
   });
-  Object.keys(S.settlements||{}).forEach(d=>{
-    if(!S.settlements[d].changeLog)S.settlements[d].changeLog=S.changeLogs[d]||[];
+  if(!S.settlements||typeof S.settlements!=='object'||Array.isArray(S.settlements))S.settlements={};
+  Object.keys(S.settlements).forEach(d=>{
+    const rec=S.settlements[d];
+    if(!rec||typeof rec!=='object'){delete S.settlements[d];return;}
+    if(rec.rate==null&&rec.completionRate!=null)rec.rate=rec.completionRate;
+    if(typeof rec.rate==='string'&&rec.rate.trim())rec.rate=Number(rec.rate);
+    if(typeof rec.rate==='number'&&rec.rate>1&&rec.rate<=100)rec.rate=rec.rate/100;
+    if(rec.rest==null)rec.rest=rec.type==='rest';
+    if(!rec.changeLog)rec.changeLog=S.changeLogs[d]||[];
   });
+  if(!S.stats||typeof S.stats!=='object')S.stats=defState().stats;
+  else S.stats=Object.assign(defState().stats,S.stats);
+  if(!Array.isArray(S.titles)||!S.titles.length)S.titles=['🌱 新手启程'];
+  else if(!S.titles.some(t=>String(t).includes('新手启程')))S.titles.unshift('🌱 新手启程');
+  if(!Array.isArray(S.achievements))S.achievements=[];
+  if(!Array.isArray(S.weeklyDone))S.weeklyDone=[];
+  if(!Array.isArray(S.monthlyDone))S.monthlyDone=[];
+  if(!S.weeklyAvg||typeof S.weeklyAvg!=='object'||Array.isArray(S.weeklyAvg))S.weeklyAvg={};
+  if(!S.monthlyAvg||typeof S.monthlyAvg!=='object'||Array.isArray(S.monthlyAvg))S.monthlyAvg={};
+  Object.keys(S.weeklyAvg).forEach(k=>{const n=coerceRate(S.weeklyAvg[k]);if(n==null)delete S.weeklyAvg[k];else S.weeklyAvg[k]=n;});
+  Object.keys(S.monthlyAvg).forEach(k=>{const n=coerceRate(S.monthlyAvg[k]);if(n==null)delete S.monthlyAvg[k];else S.monthlyAvg[k]=n;});
+  if(!Array.isArray(S.exLog))S.exLog=[];
+  const pts=coerceNumber(S.points);
+  S.points=pts==null?0:pts;
 }
 function save(){try{localStorage.setItem(KEY,JSON.stringify(S));}catch(e){toast('存储失败，空间可能已满');}}
 
@@ -615,10 +688,11 @@ function showIncentiveRecommend(milestone){
     <button class="btn btn-ghost" data-action="close">先看看</button></div>`);
 }
 function taskEnginePts(t){return TASK_ENGINE_PTS[t.priority]||2;}
-function onTaskCompletedChange(t,nowDone){
+function onTaskCompletedChange(t,nowDone,opt){
   ensureIncentiveData();
   const pts=taskEnginePts(t);
   if(nowDone){
+    if(navigator.vibrate)try{navigator.vibrate(18);}catch(e){}
     S.points+=pts;
     S.rewardEngine.totalCompleted=(S.rewardEngine.totalCompleted||0)+1;
     const milestone=Math.floor(S.rewardEngine.totalCompleted/10)*10;
@@ -627,8 +701,9 @@ function onTaskCompletedChange(t,nowDone){
     if(milestone>=10&&milestone>(S.rewardEngine.lastCountMilestone||0)){
       S.rewardEngine.lastCountMilestone=milestone;
       save();
-      showIncentiveRecommend(milestone);
-    }else{
+      if(opt&&opt.deferRecommend)pendingRecommend=milestone;
+      else showIncentiveRecommend(milestone);
+    }else if(!(opt&&opt.deferRecommend)){
       toast((t.priority||'P1')+' 完成 +'+pts+' 积分');
     }
   }else{
@@ -724,6 +799,7 @@ function parseTaskLine(line){
   const tag=(parts[0]||'').toUpperCase();
   if(['GOAL','FOCUS','THEME','DAY','REASON','目标','重点','主题','日期','说明'].includes(tag))return null;
   const name=parts[0]||'未命名任务';
+  if(name.length>180)return null;
   const minutes=(parts[1]||'30').replace(/[^\d]/g,'')||'30';
   let priority=(parts[2]||'P1').toUpperCase().replace(/[^P012]/g,'');
   if(!['P0','P1','P2'].includes(priority)){
@@ -732,41 +808,101 @@ function parseTaskLine(line){
   }
   const difficulty=clampDiff(parts[3]||3);
   let type=parts[4]||'';
-  if(!TASK_TYPES.includes(type))type='';
-  return {name,minutes,priority,difficulty,type};
+  if(!TASK_TYPES.includes(type))type=inferType(name,'');
+  const subtasks=(parts[5]||'').split(/[;；]/).map(s=>s.trim()).filter(Boolean).slice(0,6);
+  return {name,minutes,priority,difficulty,type,subtasks};
 }
-function pickTemplates(goal){
-  if(/(健身|运动|减肥|增肌|跑步|瑜伽|瘦|体能|训练)/i.test(goal))
+function isVagueTask(name){
+  const s=String(name||'').replace(/\s/g,'');
+  return /^(学习|运动|健身|工作|阅读|练习)\d+(分钟|小时)?$/.test(s)||/^(学习|运动|健身)(一小时|1小时|30分钟|四十五分钟)$/.test(s);
+}
+function planProfile(p){
+  const pr=(p&&p.profile)||{};
+  return {
+    dailyMinutes:Math.max(15,parseInt(pr.dailyMinutes,10)||60),
+    foundation:String(pr.foundation||'').trim(),
+    preference:String(pr.preference||'').trim()
+  };
+}
+function profilePrompt(p){
+  const pr=planProfile(p);
+  return `每日可投入时间：${pr.dailyMinutes}分钟\n当前基础：${pr.foundation||'未说明'}\n偏好的学习/执行方式：${pr.preference||'未说明'}`;
+}
+function shortGoal(goal){
+  const g=String(goal||'当前目标').trim();
+  return g.length>48?g.slice(0,48)+'…':g;
+}
+function hashDate(s){
+  let h=0;
+  String(s||'').split('').forEach(ch=>{h=(h*33+ch.charCodeAt(0))>>>0;});
+  return h;
+}
+function concreteBank(goal, pr, mode){
+  const g=shortGoal(goal);
+  const base=pr.foundation?`。先处理基础缺口：${pr.foundation.slice(0,28)}`:'';
+  const pref=pr.preference?`，做法贴近「${pr.preference.slice(0,22)}」`:'';
+  if(mode==='hard'){
     return [
-      {name:'力量训练主课',minutes:'25',priority:'P0'},
-      {name:'有氧运动',minutes:'20',priority:'P0'},
-      {name:'核心与拉伸',minutes:'10',priority:'P1'},
-      {name:'记录饮食与体重',minutes:'5',priority:'P1'},
-      {name:'喝水达标 / 步数补齐',minutes:'5',priority:'P2'}
+      {name:`把「${g}」收成今天唯一要交的结果${base}`,type:'其他',subs:['用一句话写下今天的完成标准','只做第一个最小步骤','记下卡住的原句或动作']},
+      {name:`用10到15分钟的短回合练习「${g}」并记录对错${pref}`,type:inferType(g,''),subs:['只选1个最小练习单元','做完并记下用时','标出1个具体错误']},
+      {name:`针对昨天的困难换一种做法再试一小段`,type:'其他',subs:['抄下困难原文','换成更小的步骤重做','对比哪种做法能做完']}
     ];
-  if(/(学习|英语|考试|读书|考研|雅思|托福|日语|编程|阅读|备考)/i.test(goal))
+  }
+  if(mode==='strong'){
     return [
-      {name:'核心知识点精学',minutes:'30',priority:'P0'},
-      {name:'完成练习 / 输出',minutes:'25',priority:'P0'},
-      {name:'复习错题与笔记',minutes:'15',priority:'P1'},
-      {name:'词汇或基础巩固',minutes:'15',priority:'P1'},
-      {name:'预习明日内容',minutes:'10',priority:'P2'}
+      {name:`把「${g}」推进到下一档，并留下可核对的数字结果${pref}`,type:inferType(g,''),subs:['写出比昨天更高的完成标准','完成这一档内容','记下正确率、次数或页数']},
+      {name:`为「${g}」做一组限时挑战并全部订正`,type:inferType(g,''),subs:['完成一组限时题或一组完整动作','订正每一处错误','总结1条下次能用的规律']},
+      {name:`不看资料，把「${g}」今天的内容讲清或做一遍`,type:'其他',subs:['独立复述或演示','标出卡壳的那一点','立刻补上这个缺口']},
+      {name:`按最终验收标准自测「${g}」的一小段`,type:inferType(g,''),subs:['写下验收标准','独立完成一小段','记录和标准的差距']},
+      {name:`为明天的「${g}」写好第一项任务和材料位置`,type:'生活',subs:['写出明天第一项的完成标准','把材料放到固定位置','估一个分钟数']}
     ];
-  if(/(工作|项目|副业|创业|写作|开发|汇报)/i.test(goal))
-    return [
-      {name:'推进最重要交付物',minutes:'45',priority:'P0'},
-      {name:'处理关键沟通',minutes:'15',priority:'P0'},
-      {name:'整理进度与阻塞',minutes:'10',priority:'P1'},
-      {name:'学习一项相关技能',minutes:'20',priority:'P1'},
-      {name:'规划明日三件事',minutes:'5',priority:'P2'}
-    ];
+  }
   return [
-    {name:'推进「'+goal+'」核心事项',minutes:'30',priority:'P0'},
-    {name:'完成一项可交付结果',minutes:'25',priority:'P0'},
-    {name:'复盘进展并记录',minutes:'10',priority:'P1'},
-    {name:'补充相关学习',minutes:'15',priority:'P1'},
-    {name:'为明日做最小准备',minutes:'5',priority:'P2'}
+    {name:`围绕「${g}」做完一节能核对的核心内容${base}${pref}`,type:inferType(g,''),subs:['标出章节、页码或动作名称','做完这一节','用自己的话写出3个要点']},
+    {name:`为「${g}」完成一组带数量的练习并记录结果`,type:inferType(g,''),subs:['确定题数、组数或字数','做完并计时','记下正确率或完成量']},
+    {name:`订正「${g}」里做错或没做顺的部分`,type:inferType(g,''),subs:['列出具体错处','每处重做一遍','用一句话写原因']},
+    {name:`用输出检验「${g}」是否真的会了`,type:'其他',subs:['不看资料讲1分钟或做1遍','标出卡壳点','补上那个缺口']},
+    {name:`写下明天「${g}」的第一项任务和所需材料`,type:'生活',subs:['写出明天第一项','准备材料','填一个预计分钟数']}
   ];
+}
+function goalAnchoredSpecs(p, date, rate, ctx){
+  const goal=p.goal||p.name||'当前目标';
+  const pr=planProfile(p);
+  const under=ctx&&ctx.underStreak!=null?ctx.underStreak:(S.stats.consecutiveUnder||0);
+  const blob=((ctx&&ctx.difficulties)||'')+((ctx&&ctx.taskNotes)||'')+((ctx&&ctx.selfSummary)||'');
+  const hard=rate<0.5||under>=2||/困难|不会|卡住|太难|跟不上/.test(blob);
+  const strong=rate>=0.8&&!hard&&under<2;
+  let n=strong?5:hard?3:4;
+  if(under>=3)n=2;
+  if((p.intensity||1)>=1.25&&!hard)n=Math.min(6,n+1);
+  if((p.intensity||1)<=0.8)n=Math.max(2,n-1);
+  if(S.restDates[date]==='half')n=Math.max(1,Math.ceil(n/2));
+  const bank=concreteBank(goal,pr,hard?'hard':strong?'strong':'steady');
+  const seed=hashDate(date+(p.id||goal));
+  const specs=[];
+  let remain=pr.dailyMinutes;
+  for(let i=0;i<n;i++){
+    const item=bank[(seed+i)%bank.length];
+    const minutes=i===n-1?Math.max(8,remain):Math.max(8,Math.round(pr.dailyMinutes/n));
+    remain-=minutes;
+    let difficulty=strong?4:hard?2:3;
+    if(strong&&i===0)difficulty=5;
+    if(hard)difficulty=i===0?2:1;
+    let priority=i===0?'P0':i<n-1?'P1':'P2';
+    if(hard&&i>0)priority='P2';
+    specs.push({
+      name:item.name,
+      minutes:String(minutes),
+      priority,
+      difficulty,
+      type:item.type||inferType(item.name,''),
+      subtasks:item.subs.slice()
+    });
+  }
+  return specs;
+}
+function pickTemplates(goal, profile){
+  return goalAnchoredSpecs({goal,name:goal,profile:profile||{dailyMinutes:60},intensity:1},todayStr(),0.7);
 }
 function milestones(goal){
   return ['第1周：建立节奏','第2周：稳定执行','第3周：突破难点','第4周：巩固复盘'];
@@ -827,10 +963,10 @@ async function generateTasksWithAI(planName,goal,cycle){
   const fallback=()=>pickTemplates(goal||planName).slice(0,maxT);
   lastAIFallback=false;
   try{
-    const systemPrompt='你是一个专业的计划管理专家。根据用户的目标和周期，生成具体、可执行的任务列表。输出格式：每行一个任务，格式为\'任务名称 | 预计时长(分钟) | 优先级(P0/P1/P2)\'，优先级规则：P0-必须完成，P1-尽力完成，P2-可选。只输出任务列表，不要其他说明。';
-    const userPrompt=`计划名称：${planName}\n目标：${goal}\n周期：${cycleSpanText(cycle)}\n请生成${minT}到${maxT}条适合每日执行的任务，任务数量与节奏应匹配该周期长度，只输出任务列表，不要其他说明。`;
+    const systemPrompt=PROMPT_COACH+'\n'+TASK_LINE_RULE+'\n只输出任务列表。';
+    const userPrompt=`计划名称：${planName}\n目标：${goal}\n周期：${cycleSpanText(cycle)}\n请生成${minT}到${maxT}条适合每日执行的任务。分钟数要能放进用户的可用时间。只输出任务列表。`;
     const text=await callDeepSeek(systemPrompt,userPrompt,{type:'tasks',data:{planName,goal,cycle}});
-    const tasks=String(text).split(/\r?\n/).map(parseTaskLine).filter(t=>t&&t.name&&t.name.length<80&&!/^任务名称/.test(t.name));
+    const tasks=String(text).split(/\r?\n/).map(parseTaskLine).filter(t=>t&&t.name&&!isVagueTask(t.name)&&!/^任务名称/.test(t.name));
     if(!tasks.length)throw new Error('parse');
     return tasks.slice(0,maxT);
   }catch(e){
@@ -914,8 +1050,15 @@ function parseMonthPlanText(text,mk,p){
   };
 }
 function fallbackWeekThemes(p){
-  const ms=(p.ms&&p.ms.length)?p.ms:milestones(p.goal||p.name);
-  return ms.map(t=>({theme:t,focus:''}));
+  const g=shortGoal(p.goal||p.name);
+  const pr=planProfile(p);
+  return [
+    {theme:`摸清「${g}」的范围，并把每天 ${pr.dailyMinutes} 分钟排成可打勾的任务`,focus:pr.foundation?`从你的基础补起：${pr.foundation.slice(0,40)}`:'先交出一个能核对的结果'},
+    {theme:`集中攻克「${g}」里最影响结果的薄弱点`,focus:'用题数、次数或正确率验收，不靠感觉'},
+    {theme:`按「${g}」的最终标准做一次小范围模拟`,focus:'记录和标准之间的具体差距'},
+    {theme:`收束「${g}」：把有效做法写成可重复的步骤`,focus:pr.preference?`沿用你偏好的方式：${pr.preference.slice(0,40)}`:'固定一种你真的做完过的方法'},
+    {theme:`在稳定完成的前提下，提高「${g}」的完成标准`,focus:'只加一点难度，并保留可核对的结果'}
+  ];
 }
 function fallbackMonthPlan(p,mk){
   const mondays=mondaysOverlappingMonth(mk);
@@ -945,7 +1088,7 @@ function parseWeekPlanText(text,wk,p){
       return;
     }
     const t=parseTaskLine(raw);
-    if(!t||!t.name||t.name.length>80)return;
+    if(!t||!t.name||isVagueTask(t.name))return;
     if(!cur){
       const dates=weekDates(wk);
       const used=dates.find(d=>(days[d]||[]).length<5)||dates[0];
@@ -967,35 +1110,8 @@ function parseWeekPlanText(text,wk,p){
     source:'ai'
   };
 }
-function fallbackDaySpecs(p,date,rate){
-  const tpls=(p.templates&&p.templates.length)?p.templates.slice():pickTemplates(p.goal||p.name);
-  let count=Math.max(2,Math.round(tpls.length*(p.intensity||1)));
-  if(rate>=0.8)count=Math.min(12,count+1);
-  else if(rate<0.5)count=Math.max(2,count-1);
-  if(S.restDates[date]==='half')count=Math.max(1,Math.ceil(count/2));
-  const type=p.category==='健身'?'运动':p.category==='学习'?'学习':p.category==='工作'?'工作':'其他';
-  const pool=TYPE_SWAP[type]||TYPE_SWAP['其他'];
-  const dow=new Date(date+'T00:00:00').getDay();
-  return tpls.slice(0,count).map((tpl,i)=>{
-    let name=tpl.name||tpl.text;
-    let difficulty=clampDiff(tpl.difficulty||3);
-    let minutes=parseInt(tpl.minutes,10)||30;
-    let priority=tpl.priority||'P1';
-    if(rate>=0.8){
-      difficulty=Math.min(5,difficulty+1);
-      minutes=Math.round(minutes*1.15);
-      if(i===0&&pool[dow%pool.length])name=pool[dow%pool.length];
-    }else if(rate<0.5){
-      difficulty=Math.max(1,difficulty-1);
-      minutes=Math.max(10,Math.round(minutes*0.85));
-      const lighter=pool[(dow+i+2)%pool.length];
-      if(lighter)name=lighter;
-      if(priority==='P0'&&i>0)priority='P1';
-    }else if(i===1&&pool[(dow+1)%pool.length]){
-      name=pool[(dow+1)%pool.length];
-    }
-    return {name,minutes:String(minutes),priority,difficulty,type:tpl.type||inferType(name,p.category)};
-  });
+function fallbackDaySpecs(p,date,rate,ctx){
+  return goalAnchoredSpecs(p,date,rate==null?0.7:rate,ctx||{});
 }
 function fallbackWeekPlan(p,wk,rate){
   const mp=p.month_plan&&p.month_plan[monthKey(wk)];
@@ -1013,15 +1129,15 @@ function fallbackWeekPlan(p,wk,rate){
 }
 function specsToTasks(p,date,specs,source){
   return (specs||[]).map((sp,i)=>makeTask(p.id,date,sp.name,sp.priority,sp.minutes,{
-    difficulty:sp.difficulty,type:sp.type,order:i,source:source||'ai',extra:false
+    difficulty:sp.difficulty,type:sp.type,order:i,source:source||'ai',extra:false,subtasks:sp.subtasks
   }));
 }
 async function generateMonthPlanWithAI(p,mk){
   lastAIFallback=false;
   const fallback=()=>fallbackMonthPlan(p,mk);
   try{
-    const sys='你是专业计划教练。把用户的大目标拆成「本月目标 + 4到5个周主题」。输出纯文本，每行一条，格式必须是：\nGOAL | 本月目标\nFOCUS | 本月重点\nW1 | 第1周主题 | 周重点\nW2 | 第2周主题 | 周重点\nW3 | ...\n不要编号以外的解释。';
-    const user=`大计划：${p.name}\n总目标：${p.goal}\n分类：${p.category||'其他'}\n月份：${monthLabel(mk)}\n周期：${cycleSpanText(p.cycle)}\n请拆解本月计划。`;
+    const sys=PROMPT_COACH+'\n把用户的大目标拆成「本月可验收目标 + 4到5个周主题」。周主题必须针对这个目标本身，不要写成通用的学习型或健身型模板。输出纯文本：\nGOAL | 本月可验收目标\nFOCUS | 本月重点\nW1 | 第1周主题 | 周重点\nW2 | 第2周主题 | 周重点\n不要解释。';
+    const user=`大计划：${p.name}\n总目标：${p.goal}\n${profilePrompt(p)}\n月份：${monthLabel(mk)}\n周期：${cycleSpanText(p.cycle)}\n请按这个人的目标和基础拆本月计划，不要套用固定类别。`;
     const text=await callDeepSeek(sys,user,{type:'month_plan',systemPrompt:sys,userPrompt:user,data:{planName:p.name,goal:p.goal,monthKey:mk}});
     const parsed=parseMonthPlanText(text,mk,p);
     if(!parsed.weekThemes.length)throw new Error('parse month');
@@ -1041,8 +1157,8 @@ async function generateWeekPlanWithAI(p,wk,ctx){
     const mp=p.month_plan&&p.month_plan[monthKey(wk)];
     const wt=mp&&(mp.weekThemes||[]).find(x=>x.weekKey===wk);
     const dates=weekDates(wk);
-    const sys='你是专业计划教练。根据月目标和上周完成情况，生成本周每天的具体任务。任务必须可执行，且要调整：数量、内容类型、难度(1-5)、优先级P0/P1/P2。输出纯文本：\nTHEME | 本周主题\nFOCUS | 本周重点\nDAY | YYYY-MM-DD\n任务名称 | 分钟 | P0/P1/P2 | 难度 | 类型\n类型只能是：学习/运动/工作/生活/其他。每天3到6条。不要其他说明。';
-    const user=`计划：${p.name}\n总目标：${p.goal}\n本月目标：${(mp&&mp.goal)||p.goal}\n本周主题：${(wt&&wt.theme)||'本周推进'}\n上周平均完成率：${rate==null?'未知':Math.round(rate*100)+'%'}\n跳过/未完成倾向：${(ctx&&ctx.skipped)||'无'}\n本周日期：${dates.join('、')}\n模式：${(MODES[p.mode]||MODES.B).label} 当前强度 ${p.intensity||1}\n请生成本周每日任务。`;
+    const sys=PROMPT_COACH+'\n'+PROMPT_ADJUST+'\n根据月目标、可用时间、基础和上周反馈，生成本周每天的具体任务。\n输出纯文本：\nTHEME | 本周主题\nFOCUS | 本周重点\nDAY | YYYY-MM-DD\n'+TASK_LINE_RULE+'\n每天3到6条，当天分钟数合计接近每日可投入时间。不要其他说明。';
+    const user=`计划：${p.name}\n总目标：${p.goal}\n${profilePrompt(p)}\n本月目标：${(mp&&mp.goal)||p.goal}\n本周主题：${(wt&&wt.theme)||'围绕目标推进'}\n上周平均完成率：${rate==null?'未知':Math.round(rate*100)+'%'}\n上周总结：${(ctx&&ctx.summary)||'无'}\n用户感想：${(ctx&&ctx.feelings)||'无'}\n任务反馈：${(ctx&&ctx.taskNotes)||(ctx&&ctx.skipped)||'无'}\n本周日期：${dates.join('、')}\n模式：${(MODES[p.mode]||MODES.B).label}\n请为每一天生成针对该目标的任务，不要套用固定模板。`;
     const text=await callDeepSeek(sys,user,{type:'week_plan',systemPrompt:sys,userPrompt:user,data:{planName:p.name,weekKey:wk,rate}});
     const parsed=parseWeekPlanText(text,wk,p);
     parsed.source='ai';
@@ -1056,23 +1172,26 @@ async function generateWeekPlanWithAI(p,wk,ctx){
 async function generateNextDayWithAI(p,date,ctx){
   lastAIFallback=false;
   const rate=ctx&&ctx.rate!=null?ctx.rate:0.7;
-  const fallback=()=>({reason:rate>=0.8?'昨日达标，今日加量并升级难度':rate<0.5?'昨日偏低，今日换轻松内容并减量':'保持节奏，微调内容',specs:fallbackDaySpecs(p,date,rate)});
+  const fallback=()=>({
+    reason:(ctx&&ctx.underStreak>=3)?'连续未达标，明天改为更少、更小的步骤，并建议休息':rate>=0.8?'完成率和质量不错，明天在同一目标上进一档':'按你的完成情况和感想重写了明天的具体任务',
+    specs:fallbackDaySpecs(p,date,rate,ctx)
+  });
   try{
     const wk=weekKey(date);
     const wp=p.week_plan&&p.week_plan[wk];
-    const sys='你是专业计划教练。根据昨天完成情况重新生成「明天」的具体任务，不要只改条数。必须同时调整：数量、任务内容/类型、难度1-5、优先级。输出：\nREASON | 一句话调整说明\n然后每行：任务名称 | 分钟 | P0/P1/P2 | 难度 | 类型\n类型只能是学习/运动/工作/生活/其他。3到7条。不要其他说明。';
-    const user=`计划：${p.name}\n总目标：${p.goal}\n本周主题：${(wp&&wp.theme)||''}\n昨日完成率：${Math.round(rate*100)}%\n昨日任务：${(ctx&&ctx.yesterday)||'无'}\n跳过的任务：${(ctx&&ctx.skipped)||'无'}\n变更日志：${(ctx&&ctx.changes)||'无'}\n模式：${(MODES[p.mode]||MODES.B).label} 强度 ${p.intensity||1}\n日期：${date} ${cnDate(date)}\n请生成该日任务。`;
+    const sys=PROMPT_ADJUST+'\n'+PROMPT_COACH+'\n输出：\nREASON | 一句话说明如何根据完成率、任务质量和用户感想调整\n'+TASK_LINE_RULE+'\n3到6条。若用户觉得困难或完成率低，就降低难度并拆开子项；若完成得好，就适度提高标准。分钟数合计接近每日可投入时间。连续多天未达标时，减少任务并建议休息。不要其他说明。';
+    const user=`计划：${p.name}\n总目标：${p.goal}\n${profilePrompt(p)}\n本周主题：${(wp&&wp.theme)||''}\n今日完成率：${Math.round(rate*100)}%\n今日任务质量：${(ctx&&ctx.yesterday)||'无'}\n跳过的任务：${(ctx&&ctx.skipped)||'无'}\n用户自我总结：${(ctx&&ctx.selfSummary)||'无'}\n今日状态：${(ctx&&ctx.mood)||'未填'}\n遇到的困难：${(ctx&&ctx.difficulties)||'无'}\n单项任务反馈：${(ctx&&ctx.taskNotes)||'无'}\n连续达标天数：${(ctx&&ctx.targetStreak)||0}\n连续未达标天数：${(ctx&&ctx.underStreak)||0}\n变更日志：${(ctx&&ctx.changes)||'无'}\n模式：${(MODES[p.mode]||MODES.B).label}\n日期：${date} ${cnDate(date)}\n请生成这一天的具体任务。`;
     const text=await callDeepSeek(sys,user,{type:'next_day',systemPrompt:sys,userPrompt:user,data:{planName:p.name,date,rate}});
-    let reason='已按昨日完成情况重写任务';
+    let reason='已按完成情况、质量和感想重写任务';
     const specs=[];
     String(text).split(/\r?\n/).forEach(line=>{
       const parts=line.trim().split('|').map(s=>s.trim());
       const tag=(parts[0]||'').toUpperCase();
       if(tag==='REASON'||tag==='说明'){reason=parts.slice(1).join(' ')||reason;return;}
       const t=parseTaskLine(line.trim());
-      if(t&&t.name&&t.name.length<80)specs.push(t);
+      if(t&&t.name&&!isVagueTask(t.name))specs.push(t);
     });
-    if(!specs.length)throw new Error('parse next day');
+    if(specs.length<2)throw new Error('parse next day');
     return {reason,specs:specs.slice(0,8),source:'ai'};
   }catch(e){
     console.warn('generateNextDayWithAI 降级',e);
@@ -1082,11 +1201,11 @@ async function generateNextDayWithAI(p,date,ctx){
     return fb;
   }
 }
-async function generateNextMonthWithAI(p,mk,avg){
+async function generateNextMonthWithAI(p,mk,avg,ctx){
   lastAIFallback=false;
   try{
-    const sys='你是专业计划教练。根据上月完成情况调整下月目标与周主题。输出：\nGOAL | 下月目标\nFOCUS | 下月重点\nW1 | 周主题 | 周重点\n... 共4到5周。不要其他说明。';
-    const user=`计划：${p.name}\n总目标：${p.goal}\n上月平均完成率：${avg==null?'未知':Math.round(avg*100)+'%'}\n下月：${monthLabel(mk)}\n请给出下月计划。`;
+    const sys=PROMPT_COACH+'\n根据上月完成数据、自我总结和任务反馈调整下月目标与周主题。目标必须仍然具体可验收。输出：\nGOAL | 下月可验收目标\nFOCUS | 下月重点\nW1 | 周主题 | 周重点\n共4到5周。不要其他说明。';
+    const user=`计划：${p.name}\n总目标：${p.goal}\n${profilePrompt(p)}\n上月平均完成率：${avg==null?'未知':Math.round(avg*100)+'%'}\n上月总结：${(ctx&&ctx.summary)||'无'}\n用户感想：${(ctx&&ctx.feelings)||'无'}\n下月：${monthLabel(mk)}\n请给出下月计划。完成率高就适度进阶，完成率低或困难多就收窄目标、降低难度。`;
     const text=await callDeepSeek(sys,user,{type:'next_month',systemPrompt:sys,userPrompt:user,data:{planName:p.name,monthKey:mk,avg}});
     const parsed=parseMonthPlanText(text,mk,p);
     parsed.source='ai';
@@ -1095,8 +1214,8 @@ async function generateNextMonthWithAI(p,mk,avg){
     console.warn('generateNextMonthWithAI 降级',e);
     lastAIFallback=true;
     const fb=fallbackMonthPlan(p,mk);
-    if(avg>=0.8)fb.focus='上月达标，本月目标上调一档';
-    else if(avg<0.5)fb.focus='上月偏低，本月目标收窄、降低难度';
+    if(avg>=0.8)fb.focus='上月完成较好，本月在同一目标上提高验收标准';
+    else if(avg<0.5)fb.focus='上月偏低，本月收窄目标，并把任务拆得更小';
     return fb;
   }
 }
@@ -1113,7 +1232,8 @@ function makeTask(planId,date,text,priority,minutes,extra){
     difficulty:clampDiff(o.difficulty||3),
     type:o.type||inferType(text,plan&&plan.category),
     skipped:!!o.skipped,extra:!!o.extra,
-    order:o.order||0,source:o.source||'ai'
+    order:o.order||0,source:o.source||'ai',
+    subtasks:o.subtasks||[]
   };
   return normalizeTaskFields(t,plan);
 }
@@ -1189,10 +1309,19 @@ function collectSkippedSummary(p,wk){
 function collectYesterdaySummary(p,date){
   const y=addDays(date,-1);
   const tasks=(S.tasks[y]||[]).filter(t=>t.planId===p.id);
-  if(!tasks.length)return {yesterday:'无',skipped:'无'};
-  const yesterday=tasks.map(t=>`${t.text}(${t.status||'none'}${t.skipped?'/跳过':''})`).join('、');
+  const df=S.dailyFeedback[y]||{};
+  const base={
+    taskNotes:collectDayFeedbackDigest(y,p.id),
+    selfSummary:df.selfSummary||'',mood:df.mood||'',difficulties:df.difficulties||'',
+    targetStreak:S.stats.targetStreak||0,underStreak:S.stats.consecutiveUnder||0
+  };
+  if(!tasks.length)return Object.assign({yesterday:'无',skipped:'无'},base);
+  const yesterday=tasks.map(t=>{
+    const subs=(t.subtasks||[]).map(s=>`${s.text}:${s.done?'完成':'未完成'}`).join('；');
+    return `${t.text}[${t.status||'none'}${t.skipped?'/跳过':''}]`+(subs?` 子项:${subs}`:'');
+  }).join('\n');
   const skipped=tasks.filter(t=>t.skipped).map(t=>t.text).join('、')||'无';
-  return {yesterday,skipped};
+  return Object.assign({yesterday,skipped},base);
 }
 async function syncHierarchy(date){
   date=date||todayStr();
@@ -1229,11 +1358,13 @@ function createPlan(name,category,mode,goal,templates,ms,cycle,extra){
   const p={
     id:uid(),name,category,mode:mode||'B',templates:tpl.map(t=>({
       name:t.name||t.text,minutes:t.minutes||'30',priority:t.priority||'P1',
-      difficulty:clampDiff(t.difficulty),type:t.type||inferType(t.name||t.text,category)
+      difficulty:clampDiff(t.difficulty),type:t.type||inferType(t.name||t.text,category),
+      subtasks:t.subtasks||[]
     })),
     ms:(ms&&ms.length)?ms:milestones(goal),
     goal,intensity:1,createdAt:todayStr(),color:pickColor(),
     cycle:cycle||'月',status:'active',
+    profile:o.profile||{dailyMinutes:60,foundation:'',preference:''},
     month_plan:o.month_plan||{},
     week_plan:o.week_plan||{}
   };
@@ -1269,7 +1400,173 @@ function streakTargetDays(){
   return n;
 }
 
-function settleDay(){
+function feedbackBits(fb){
+  if(!fb)return '';
+  const bits=[];
+  if(fb.feeling)bits.push('感想:'+fb.feeling);
+  if(fb.timeSpent)bits.push('用时:'+fb.timeSpent+'分钟');
+  if(fb.difficulty)bits.push('难度感受:'+fb.difficulty);
+  if(fb.problems)bits.push('问题:'+fb.problems);
+  return bits.join('，');
+}
+function collectDayFeedbackDigest(date, planId){
+  const lines=[];
+  (S.tasks[date]||[]).forEach(t=>{
+    if(planId&&t.planId!==planId)return;
+    const fb=feedbackBits(S.taskFeedback[t.id]);
+    const subs=(t.subtasks||[]).map(s=>{
+      const sf=feedbackBits(S.taskFeedback[s.id]);
+      return s.text+(s.done?'完成':'未完成')+(sf?'（'+sf+'）':'');
+    }).join('；');
+    if(fb||subs||t.status)lines.push(`${t.text}[${t.status||'none'}]${fb?' '+fb:''}${subs?' 子项:'+subs:''}`);
+  });
+  return lines.join('\n')||'无';
+}
+function datesOfMonth(mk){
+  const [y,m]=mk.split('-').map(Number);
+  const n=new Date(y,m,0).getDate();
+  const out=[];
+  for(let d=1;d<=n;d++)out.push(mk+'-'+String(d).padStart(2,'0'));
+  return out;
+}
+function typeStatsForDates(dates){
+  const map={};
+  dates.forEach(d=>{
+    (S.tasks[d]||[]).forEach(t=>{
+      if(t.skipped)return;
+      const tp=t.type||'其他';
+      if(!map[tp])map[tp]={total:0,done:0,partial:0,hard:0};
+      map[tp].total++;
+      if((t.status||'none')==='done')map[tp].done++;
+      else if(t.status==='partial')map[tp].partial++;
+      const bump=fb=>{if(fb&&(fb.difficulty==='困难'||fb.problems))map[tp].hard++;};
+      bump(S.taskFeedback[t.id]);
+      (t.subtasks||[]).forEach(s=>bump(S.taskFeedback[s.id]));
+    });
+  });
+  return map;
+}
+function typeLine(map){
+  const keys=Object.keys(map||{});
+  if(!keys.length)return '暂无任务类型数据';
+  return keys.map(k=>{
+    const t=map[k];
+    return `${k}完成 ${t.done}/${t.total}`+(t.hard?`，困难反馈 ${t.hard} 次`:'');
+  }).join('；');
+}
+function longestTargetStreakIn(dates){
+  let best=0,cur=0;
+  dates.forEach(d=>{
+    const r=S.settlements[d];
+    if(r&&!r.rest&&r.rate>=0.8){cur++;best=Math.max(best,cur);}
+    else cur=0;
+  });
+  return best;
+}
+function feelingLines(dates){
+  return dates.map(d=>{
+    const f=S.dailyFeedback[d];
+    if(!f||(!f.selfSummary&&!f.difficulties))return '';
+    return `${d}（${f.mood||'一般'}）${f.selfSummary||''}${f.difficulties?' 困难：'+f.difficulties:''}`;
+  }).filter(Boolean);
+}
+function buildWeeklySummary(wk){
+  const dates=weekDates(wk).filter(d=>d<=todayStr());
+  const recs=dates.map(d=>S.settlements[d]).filter(r=>r&&!r.rest&&typeof r.rate==='number');
+  const avg=recs.length?recs.reduce((a,r)=>a+r.rate,0)/recs.length:(S.weeklyAvg[wk]||0);
+  const types=typeStatsForDates(dates);
+  const feelings=feelingLines(dates);
+  const longest=longestTargetStreakIn(dates);
+  const summary=`周完成率 ${Math.round(avg*100)}%。最长连续达标 ${longest} 天。各类型：${typeLine(types)}。每周感想：${feelings.join(' / ')||'本周还没有写下感想'}`;
+  const prev=S.weeklySummary[wk]||{};
+  return {week:wk,summary,aiFeedback:prev.aiFeedback||'',rate:avg,longestStreak:longest,typeStats:types,feelings:feelings.join('\n')};
+}
+function buildMonthlySummary(mk){
+  const dates=datesOfMonth(mk).filter(d=>d<=todayStr());
+  const recs=dates.map(d=>S.settlements[d]).filter(r=>r&&!r.rest&&typeof r.rate==='number');
+  const avg=recs.length?recs.reduce((a,r)=>a+r.rate,0)/recs.length:(S.monthlyAvg[mk]||0);
+  const types=typeStatsForDates(dates);
+  const feelings=feelingLines(dates);
+  const longest=longestTargetStreakIn(dates);
+  const summary=`月完成率 ${Math.round(avg*100)}%。最长连续达标 ${longest} 天。各类型：${typeLine(types)}。月内感想：${feelings.slice(0,8).join(' / ')||'本月还没有写下感想'}`;
+  const prev=S.monthlySummary[mk]||{};
+  return {month:mk,summary,aiFeedback:prev.aiFeedback||'',rate:avg,longestStreak:longest,typeStats:types,feelings:feelings.join('\n')};
+}
+function localCoachFeedback(kind, payload){
+  const rate=Math.round((Number(payload.rate)||0)*100);
+  const notes=payload.taskNotes||'';
+  const diff=payload.difficulties||'';
+  const hard=/困难/.test(notes+' '+diff)||(payload.underStreak||0)>=2;
+  if(kind==='day'){
+    let s=`今天加权完成率 ${rate}%。`;
+    if(payload.mood)s+=`你把状态记成「${payload.mood}」。`;
+    if(payload.selfSummary)s+=`你的总结是：「${String(payload.selfSummary).slice(0,80)}」。`;
+    if(diff)s+=`你遇到的困难是：「${String(diff).slice(0,80)}」。`;
+    if(notes&&notes!=='无')s+=`任务反馈里写到：${String(notes).replace(/\n/g,' ').slice(0,140)}。`;
+    if((payload.underStreak||0)>=3)s+='已经连续多天没达标，建议明天休息或改成半量，并把任务拆成更小的步骤。';
+    else if(hard||rate<50)s+='困难比较集中，明天会降低难度、拆开子项，而不是只减少条数。';
+    else if(rate>=80)s+='完成率和质量都不错，明天会在同一个目标上加一点可核对的挑战。';
+    else s+='节奏还在。明天保持相近的时间，并针对你写下的问题换一种做法。';
+    return s;
+  }
+  if(kind==='week'){
+    let s=`上周完成率 ${rate}%，最长连续达标 ${payload.longestStreak||0} 天。`;
+    if(payload.typeLine)s+=payload.typeLine+'。';
+    if(payload.feelings)s+=`你这周写过：${String(payload.feelings).slice(0,140)}。`;
+    if(hard||rate<50)s+='下周会把反复觉得困难的部分拆小，并降低难度。';
+    else if(rate>=80)s+='下周可以适度进阶，把时间更多放在你完成得最好的内容上。';
+    else s+='下周先稳住任务量，侧重点收回到最影响结果的一块。';
+    return s;
+  }
+  let s=`上月完成率 ${rate}%，最长连续达标 ${payload.longestStreak||0} 天。`;
+  if(payload.typeLine)s+=payload.typeLine+'。';
+  if(payload.feelings)s+=`月内感想：${String(payload.feelings).slice(0,160)}。`;
+  s+=rate>=80?'下月目标可以上调一档，每天仍然要有可打勾的具体结果。':'下月先收窄目标，把每天的任务拆得更具体。';
+  return s;
+}
+async function generateCoachFeedback(kind, payload){
+  try{
+    const sys=PROMPT_FEEDBACK+' 用中文写120到220字，直接称呼“你”。必须引用完成数据、自我总结或任务反馈里的具体内容。指出进步和不足，并给出下一步建议。只输出反馈正文。';
+    const user=`反馈类型：${kind==='day'?'日总结':kind==='week'?'周总结':'月总结'}\n${JSON.stringify(payload)}`;
+    const text=await callDeepSeek(sys,user,{type:'coach_feedback',systemPrompt:sys,userPrompt:user,data:{kind}});
+    const out=String(text||'').trim();
+    if(!out)throw new Error('empty feedback');
+    return out.slice(0,500);
+  }catch(e){
+    console.warn('generateCoachFeedback 降级',e);
+    return localCoachFeedback(kind,payload);
+  }
+}
+async function fillPeriodFeedback(kind, key){
+  const pack=kind==='week'?(S.weeklySummary[key]||buildWeeklySummary(key)):(S.monthlySummary[key]||buildMonthlySummary(key));
+  const dates=kind==='week'?weekDates(key):datesOfMonth(key);
+  pack.aiFeedback=await generateCoachFeedback(kind,{
+    rate:pack.rate,
+    longestStreak:pack.longestStreak,
+    typeLine:typeLine(pack.typeStats),
+    feelings:pack.feelings,
+    taskNotes:dates.map(d=>collectDayFeedbackDigest(d)).filter(x=>x!=='无').join('\n').slice(0,1200)
+  });
+  if(kind==='week')S.weeklySummary[key]=pack;
+  else S.monthlySummary[key]=pack;
+  save();
+  const el=$('periodAI');
+  if(el)el.textContent=pack.aiFeedback;
+  if(view==='plan'&&planTab==='summary')render();
+}
+function findTask(date,id){
+  const t=(S.tasks[date]||[]).find(x=>x.id===id);
+  if(t)return {task:t,sub:null};
+  let found=null;
+  (S.tasks[date]||[]).some(task=>{
+    const sub=(task.subtasks||[]).find(s=>s.id===id);
+    if(sub){found={task,sub};return true;}
+    return false;
+  });
+  return found;
+}
+
+function settleDay(feedback){
   const d=todayStr();
   if(S.settlements[d]){toast('今日已经结算过了');return;}
   const tasks=todayTasks(d);
@@ -1309,12 +1606,19 @@ function settleDay(){
     bonusHalf=true;
   }
 
+  S.dailyFeedback[d]={
+    date:d,
+    selfSummary:(feedback&&feedback.selfSummary)||'',
+    mood:(feedback&&feedback.mood)||'一般',
+    difficulties:(feedback&&feedback.difficulties)||'',
+    aiFeedback:'',
+    taskDigest:collectDayFeedbackDigest(d)
+  };
   S.settlements[d]={rate,points:pts,type,rest:false,adjustments,engineDaily,changeLog:S.changeLogs[d]||[]};
   S.points+=pts;
   save();
   checkPeriod(d);
-  showDailySettlement({rate,pts,type,titleUnlock,achUnlock,adjustments,bonusHalf,engineDaily});
-  regenTomorrowAsync(d,rate,adjustments);
+  beginCoachReview({rate,pts,type,titleUnlock,achUnlock,adjustments,bonusHalf,engineDaily,date:d});
 }
 
 function startHalfDay(){
@@ -1359,44 +1663,58 @@ function checkPeriod(d){
   S.lastMonth=mk;
   save();
 }
-async function regenTomorrowAsync(d,rate,adjustments){
+async function draftNextDay(d, rate){
   const tomorrow=addDays(d,1);
-  if(S.restDates[tomorrow]==='full')return;
-  const reasons=[];
-  const plans=activePlans();
-  for(let i=0;i<plans.length;i++){
-    const p=plans[i];
+  if(S.restDates[tomorrow]==='full')return {date:tomorrow,from:d,plans:[],rest:'full'};
+  const plans=[];
+  const active=activePlans();
+  for(let i=0;i<active.length;i++){
+    const p=active[i];
     const ctx=collectYesterdaySummary(p,tomorrow);
     ctx.rate=rate;
-    const logs=(S.changeLogs[d]||[]).filter(x=>x.planId===p.id).map(x=>x.action+':'+(x.text||'')).join('、');
-    ctx.changes=logs||'无';
+    ctx.changes=(S.changeLogs[d]||[]).filter(x=>x.planId===p.id).map(x=>x.action+':'+(x.text||'')).join('、')||'无';
     try{
       const out=await generateNextDayWithAI(p,tomorrow,ctx);
-      replacePlanDayTasks(p,tomorrow,out.specs,{keepUser:true,source:out.source||'ai'});
-      reasons.push({name:p.name,reason:out.reason,label:adjLabel(rate,p.mode)});
-    }catch(e){
-      console.warn('regenTomorrow',e);
-    }
+      plans.push({planId:p.id,name:p.name,reason:out.reason,label:adjLabel(rate,p.mode),specs:out.specs,source:out.source||'ai'});
+    }catch(e){console.warn('draftNextDay',e);}
   }
+  return {date:tomorrow,from:d,plans};
+}
+async function beginCoachReview(meta){
+  const df=S.dailyFeedback[meta.date]||{};
+  openModal(`<div class="celeb"><div class="em">${meta.rate>=.8?'🎉':'💪'}</div>
+    <h3>今日结算 · ${rateTypeLabel(meta.type)}</h3>
+    <div class="sub">加权完成率 ${Math.round(meta.rate*100)}% · +${meta.pts} 积分</div>
+    <div class="hint" id="coachWait">正在根据完成率、任务反馈和你的总结写反馈，并重排明日任务...</div></div>`);
+  render();
+  const ai=await generateCoachFeedback('day',{
+    rate:meta.rate,mood:df.mood,selfSummary:df.selfSummary,difficulties:df.difficulties,
+    taskNotes:df.taskDigest,underStreak:S.stats.consecutiveUnder||0,targetStreak:S.stats.targetStreak||0
+  });
+  if(S.dailyFeedback[meta.date])S.dailyFeedback[meta.date].aiFeedback=ai;
+  let draft={date:addDays(meta.date,1),from:meta.date,plans:[]};
+  try{draft=await draftNextDay(meta.date, meta.rate);}catch(e){console.warn(e);}
+  S.pendingNextDay=draft;
   save();
-  const el=$('aiNextDay');
-  if(el&&reasons.length){
-    el.innerHTML='<div style="font-weight:800;margin-bottom:6px;">AI 已重写次日任务</div>'+
-      reasons.map(r=>`<div class="adj-row"><span>${esc(r.name)}</span><span>${esc(r.label)}</span></div><div class="log-item">${esc(r.reason)}</div>`).join('');
-  }
+  showNextDayConfirm(meta, ai, draft);
 }
 async function regenWeekAsync(today,prevWk){
   const avg=S.weeklyAvg[prevWk];
+  const sum=S.weeklySummary[prevWk];
   const plans=activePlans();
   for(let i=0;i<plans.length;i++){
     const p=plans[i];
     try{
       const wk=weekKey(today);
       const skipped=collectSkippedSummary(p,prevWk);
-      p.week_plan[wk]=await generateWeekPlanWithAI(p,wk,{rate:avg,skipped});
+      const taskNotes=weekDates(prevWk).map(d=>collectDayFeedbackDigest(d,p.id)).filter(x=>x!=='无').join('\n');
+      p.week_plan[wk]=await generateWeekPlanWithAI(p,wk,{
+        rate:avg,skipped,summary:sum&&sum.summary,feelings:sum&&sum.feelings,taskNotes
+      });
       weekDates(wk).forEach(d=>{
         if(d<today)return;
         if(S.settlements[d])return;
+        if(S.pendingNextDay&&S.pendingNextDay.date===d)return;
         const specs=p.week_plan[wk].dayPlans[d];
         if(specs)replacePlanDayTasks(p,d,specs,{keepUser:true,source:p.week_plan[wk].source});
       });
@@ -1406,16 +1724,23 @@ async function regenWeekAsync(today,prevWk){
 }
 async function regenMonthAsync(today,prevMk){
   const avg=S.monthlyAvg[prevMk];
+  const sum=S.monthlySummary[prevMk];
   const mk=monthKey(today);
   const plans=activePlans();
   for(let i=0;i<plans.length;i++){
     const p=plans[i];
     try{
-      p.month_plan[mk]=await generateNextMonthWithAI(p,mk,avg);
+      p.month_plan[mk]=await generateNextMonthWithAI(p,mk,avg,{summary:sum&&sum.summary,feelings:sum&&sum.feelings});
       const wk=weekKey(today);
-      p.week_plan[wk]=await generateWeekPlanWithAI(p,wk,{rate:avg,skipped:collectSkippedSummary(p,weekKey(addDays(today,-1)))});
+      p.week_plan[wk]=await generateWeekPlanWithAI(p,wk,{
+        rate:avg,
+        skipped:collectSkippedSummary(p,weekKey(addDays(today,-1))),
+        summary:sum&&sum.summary,
+        feelings:sum&&sum.feelings
+      });
       weekDates(wk).forEach(d=>{
         if(d<today||S.settlements[d])return;
+        if(S.pendingNextDay&&S.pendingNextDay.date===d)return;
         const specs=p.week_plan[wk].dayPlans[d];
         if(specs)replacePlanDayTasks(p,d,specs,{keepUser:true,source:p.week_plan[wk].source});
       });
@@ -1444,8 +1769,11 @@ function settleWeek(wk){
       S.rewardEngine.weekEngine[wk]=20;
     }
   }else S.stats.weeklyStreak=0;
-  S.points+=pts;S.weeklyDone.push(wk);save();
-  showPeriodCelebration({kind:'week',avg,pts,title:t});
+  S.points+=pts;S.weeklyDone.push(wk);
+  S.weeklySummary[wk]=buildWeeklySummary(wk);
+  save();
+  showPeriodCelebration({kind:'week',avg,pts,title:t,summary:S.weeklySummary[wk].summary});
+  fillPeriodFeedback('week',wk);
 }
 function settleMonth(mk){
   ensureIncentiveData();
@@ -1472,8 +1800,11 @@ function settleMonth(mk){
       S.rewardEngine.monthEngine[mk]=50;
     }
   }else S.stats.monthlyStreak=0;
-  S.points+=pts;S.monthlyDone.push(mk);save();
-  showPeriodCelebration({kind:'month',avg,pts,title:t});
+  S.points+=pts;S.monthlyDone.push(mk);
+  S.monthlySummary[mk]=buildMonthlySummary(mk);
+  save();
+  showPeriodCelebration({kind:'month',avg,pts,title:t,summary:S.monthlySummary[mk].summary});
+  fillPeriodFeedback('month',mk);
 }
 
 /* ============ 兑换 / 导入导出 ============ */
@@ -1494,7 +1825,7 @@ function buildBackup(){
   const snapshot=JSON.parse(JSON.stringify(S));
   return{
     app:'smart-plan-coach',
-    version:4,
+    version:5,
     exportedAt:new Date().toISOString(),
     plans:snapshot.plans||[],
     tasks:snapshot.tasks||{},
@@ -1505,30 +1836,192 @@ function buildBackup(){
     titles:snapshot.titles||[],
     incentives:snapshot.incentives||[],
     rewardLog:snapshot.exLog||[],
+    dailyFeedback:snapshot.dailyFeedback||{},
+    taskFeedback:snapshot.taskFeedback||{},
+    weeklySummary:snapshot.weeklySummary||{},
+    monthlySummary:snapshot.monthlySummary||{},
+    pendingNextDay:snapshot.pendingNextDay||null,
     data:snapshot
   };
 }
+function coerceNumber(v){
+  if(typeof v==='number'&&isFinite(v))return Math.round(v);
+  if(typeof v==='string'&&v.trim()&&isFinite(Number(v)))return Math.round(Number(v));
+  return null;
+}
+function importScore(v){
+  if(Array.isArray(v))return v.length;
+  if(v&&typeof v==='object')return Object.keys(v).length;
+  return -1;
+}
+function preferImport(a,b){
+  return importScore(a)>=importScore(b)?a:b;
+}
+function coerceRate(v){
+  if(typeof v==='string'&&v.trim())v=Number(v);
+  if(typeof v!=='number'||!isFinite(v))return null;
+  if(v>1&&v<=100)return v/100;
+  if(v<0)return 0;
+  if(v>1)return 1;
+  return v;
+}
+function coerceTaskMap(raw, lost){
+  const map={};
+  if(raw==null)return map;
+  if(Array.isArray(raw)){
+    raw.forEach((t,i)=>{
+      if(!t||typeof t!=='object'){lost.push('第 '+(i+1)+' 条任务不是对象，已跳过');return;}
+      const d=String(t.date||t.day||'');
+      if(!/^\d{4}-\d{2}-\d{2}$/.test(d)){lost.push('有一条任务缺少有效日期，已跳过');return;}
+      if(!map[d])map[d]=[];
+      map[d].push(t);
+    });
+    return map;
+  }
+  if(typeof raw==='object'){
+    Object.keys(raw).forEach(k=>{
+      const arr=raw[k];
+      if(!Array.isArray(arr)){lost.push(k+' 的任务不是列表，这一天已跳过');return;}
+      const ok=arr.filter(t=>t&&typeof t==='object');
+      if(ok.length<arr.length)lost.push(k+' 有 '+(arr.length-ok.length)+' 条无法识别的任务，已跳过');
+      if(/^\d{4}-\d{2}-\d{2}$/.test(k))map[k]=ok;
+      else if(ok.length)lost.push('日期「'+k+'」无法识别，该日任务已跳过');
+    });
+    return map;
+  }
+  lost.push('任务区格式无法识别，任务未导入');
+  return map;
+}
+function coerceRecordMap(raw, lost, label){
+  const map={};
+  if(raw==null)return map;
+  if(typeof raw!=='object'||Array.isArray(raw)){lost.push(label+'不是按日期存放的记录，已跳过');return map;}
+  Object.keys(raw).forEach(k=>{
+    const rec=raw[k];
+    if(!rec||typeof rec!=='object'||Array.isArray(rec)){lost.push(label+'里 '+k+' 无法识别，已跳过');return;}
+    const copy=Object.assign({},rec);
+    const rate=coerceRate(copy.rate!=null?copy.rate:copy.completionRate);
+    if(rate!=null)copy.rate=rate;
+    if(copy.rest==null)copy.rest=copy.type==='rest';
+    map[k]=copy;
+  });
+  return map;
+}
+function coerceTitles(raw, lost){
+  const out=[];
+  if(raw==null)return ['🌱 新手启程'];
+  if(!Array.isArray(raw)){lost.push('称号格式无法识别，已保留默认称号');return ['🌱 新手启程'];}
+  raw.forEach(t=>{
+    if(typeof t==='string'&&t.trim())out.push(t.trim());
+    else if(t&&typeof t==='object'){
+      const name=(t.n||t.name||'').trim();
+      if(name)out.push(((t.e||t.emoji||'')+' '+name).trim());
+    }
+  });
+  if(!out.length){lost.push('称号列表是空的，已保留默认称号');return ['🌱 新手启程'];}
+  if(!out.some(t=>t.includes('新手启程')))out.unshift('🌱 新手启程');
+  return out;
+}
+function coercePlans(raw, lost){
+  if(raw==null)return [];
+  if(!Array.isArray(raw)){lost.push('计划列表格式无法识别，计划未导入');return [];}
+  const out=[];
+  raw.forEach((p,i)=>{
+    if(!p||typeof p!=='object'||Array.isArray(p)){lost.push('第 '+(i+1)+' 个计划无法识别，已跳过');return;}
+    if(!p.id)p.id='legacy'+i+uid();
+    out.push(p);
+  });
+  return out;
+}
+function linkOrphanTasks(plans, tasks, lost){
+  const ids=new Set(plans.map(p=>p.id));
+  let orphans=0;
+  Object.keys(tasks).forEach(d=>{
+    (tasks[d]||[]).forEach(t=>{
+      if(!t.planId&&plans.length===1)t.planId=plans[0].id;
+      else if(t.planId&&!ids.has(t.planId))orphans++;
+    });
+  });
+  if(orphans)lost.push(orphans+' 条任务找不到对应计划，导入后不会出现在今日列表里');
+}
 function normalizeImported(obj){
-  if(!obj||typeof obj!=='object'||Array.isArray(obj))return null;
-  const src={};
-  if(obj.app==='smart-plan-coach'&&obj.data&&typeof obj.data==='object')Object.assign(src,obj.data);
-  else Object.assign(src,obj);
-  if(Array.isArray(obj.plans))src.plans=obj.plans;
-  if(obj.tasks&&typeof obj.tasks==='object'&&!Array.isArray(obj.tasks))src.tasks=obj.tasks;
-  if(obj.dailyRecords&&typeof obj.dailyRecords==='object')src.settlements=obj.dailyRecords;
-  else if(obj.settlements&&typeof obj.settlements==='object')src.settlements=obj.settlements;
-  if(typeof obj.points==='number')src.points=obj.points;
-  else if(typeof obj.userPoints==='number')src.points=obj.userPoints;
-  else if(typeof src.userPoints==='number'&&typeof src.points!=='number')src.points=src.userPoints;
-  if(Array.isArray(obj.titles))src.titles=obj.titles;
-  if(Array.isArray(obj.incentives))src.incentives=obj.incentives;
-  if(obj.changeLogs&&typeof obj.changeLogs==='object')src.changeLogs=obj.changeLogs;
-  if(Array.isArray(obj.rewardLog))src.exLog=obj.rewardLog;
-  else if(Array.isArray(obj.exLog))src.exLog=obj.exLog;
-  if(!Array.isArray(src.plans))return null;
-  if(typeof src.points!=='number')src.points=0;
-  if(!src.tasks||typeof src.tasks!=='object')src.tasks={};
-  return Object.assign(defState(),src);
+  const notes=[];
+  const lost=[];
+  try{
+    if(typeof obj==='string'){
+      try{obj=JSON.parse(obj);}catch(e){
+        return {ok:false,message:'文件内容多包了一层文字，里面不是合法 JSON。',lost:['全部数据都未导入，当前本地数据没有改动']};
+      }
+    }
+    if(!obj||typeof obj!=='object'||Array.isArray(obj)){
+      return {ok:false,message:'这个文件不是智能计划教练的备份对象。',lost:['全部数据都未导入，当前本地数据没有改动']};
+    }
+    const base=obj.app==='smart-plan-coach'&&obj.data&&typeof obj.data==='object'&&!Array.isArray(obj.data)?obj.data:{};
+    const fromVersion=Number(obj.version||base.version||0);
+    if(!fromVersion||fromVersion<5)notes.push('识别为旧版备份，已自动补上新字段的默认值');
+    const plans=coercePlans(preferImport(obj.plans, base.plans), lost);
+    const tasks=coerceTaskMap(preferImport(obj.tasks, base.tasks), lost);
+    const settlements=coerceRecordMap(
+      preferImport(preferImport(obj.dailyRecords, obj.settlements), preferImport(base.dailyRecords, base.settlements)),
+      lost,'每日结算');
+    const points=coerceNumber(obj.points!=null?obj.points:obj.userPoints!=null?obj.userPoints:base.points!=null?base.points:base.userPoints);
+    if(points==null&&(obj.points!=null||obj.userPoints!=null||base.points!=null||base.userPoints!=null)){
+      lost.push('积分不是有效数字，已按 0 导入');
+    }
+    const titles=coerceTitles(preferImport(obj.titles, base.titles), lost);
+    let incentives=preferImport(obj.incentives, base.incentives);
+    if(incentives==null)incentives=[];
+    else if(!Array.isArray(incentives)){lost.push('激励库格式无法识别，激励条目未导入');incentives=[];}
+    else{
+      const ok=incentives.filter(it=>it&&typeof it==='object');
+      if(ok.length<incentives.length)lost.push('激励库有 '+(incentives.length-ok.length)+' 条无法识别，已跳过');
+      incentives=ok;
+    }
+    let exLog=preferImport(preferImport(obj.rewardLog, obj.exLog), preferImport(base.rewardLog, base.exLog));
+    if(!Array.isArray(exLog))exLog=[];
+    const state=Object.assign(defState(),{
+      version:5,
+      points:points==null?0:points,
+      titles,
+      selTitle:typeof (obj.selTitle||base.selTitle)==='string'?(obj.selTitle||base.selTitle):null,
+      achievements:Array.isArray(base.achievements)?base.achievements:Array.isArray(obj.achievements)?obj.achievements:[],
+      plans,
+      tasks,
+      settlements,
+      restDates:(base.restDates&&typeof base.restDates==='object'&&!Array.isArray(base.restDates))?base.restDates:{},
+      changeLogs:preferImport(obj.changeLogs, base.changeLogs),
+      weeklyDone:Array.isArray(base.weeklyDone)?base.weeklyDone:[],
+      monthlyDone:Array.isArray(base.monthlyDone)?base.monthlyDone:[],
+      weeklyAvg:(base.weeklyAvg&&typeof base.weeklyAvg==='object')?base.weeklyAvg:{},
+      monthlyAvg:(base.monthlyAvg&&typeof base.monthlyAvg==='object')?base.monthlyAvg:{},
+      stats:(base.stats&&typeof base.stats==='object')?Object.assign(defState().stats, base.stats):defState().stats,
+      lastWeek:base.lastWeek||null,
+      lastMonth:base.lastMonth||null,
+      exLog,
+      settings:(base.settings&&typeof base.settings==='object')?Object.assign({apiKey:'',proxyUrl:''}, base.settings):{apiKey:'',proxyUrl:''},
+      incentives,
+      rewardEngine:(base.rewardEngine&&typeof base.rewardEngine==='object')?base.rewardEngine:defState().rewardEngine,
+      dailyFeedback:(base.dailyFeedback&&typeof base.dailyFeedback==='object')?base.dailyFeedback:(obj.dailyFeedback&&typeof obj.dailyFeedback==='object')?obj.dailyFeedback:{},
+      taskFeedback:(base.taskFeedback&&typeof base.taskFeedback==='object')?base.taskFeedback:(obj.taskFeedback&&typeof obj.taskFeedback==='object')?obj.taskFeedback:{},
+      weeklySummary:(base.weeklySummary&&typeof base.weeklySummary==='object')?base.weeklySummary:(obj.weeklySummary&&typeof obj.weeklySummary==='object')?obj.weeklySummary:{},
+      monthlySummary:(base.monthlySummary&&typeof base.monthlySummary==='object')?base.monthlySummary:(obj.monthlySummary&&typeof obj.monthlySummary==='object')?obj.monthlySummary:{},
+      pendingNextDay:base.pendingNextDay||obj.pendingNextDay||null
+    });
+    if(!state.changeLogs||typeof state.changeLogs!=='object'||Array.isArray(state.changeLogs))state.changeLogs={};
+    if(!fromVersion||fromVersion<5){
+      notes.push('旧版没有的日总结、任务反馈、周总结、月总结已用空记录补上');
+      notes.push('任务若没有子项，会显示为一条完整任务，仍可勾选');
+    }
+    linkOrphanTasks(plans, tasks, lost);
+    if(!plans.length&&importScore(tasks)<=0&&!Object.keys(settlements).length){
+      return {ok:false,message:'没有找到计划、任务或结算记录。请确认文件是智能计划教练导出的 JSON。',lost:['全部数据都未导入，当前本地数据没有改动']};
+    }
+    state._importNotes=notes.concat(lost.map(x=>'需留意：'+x));
+    return {ok:true,state,notes,lost};
+  }catch(e){
+    console.warn('normalizeImported',e);
+    return {ok:false,message:'导入时发生异常：'+(e&&e.message?e.message:'未知错误'),lost:['为避免覆盖当前数据，这次导入已全部取消','请检查备份文件是否完整。计划、任务、积分和称号都还留在当前浏览器里']};
+  }
 }
 function backupSummary(d){
   const planN=(d.plans||[]).length;
@@ -1574,23 +2067,44 @@ function handleImportFile(e){
   const file=e.target.files&&e.target.files[0];
   e.target.value='';
   if(!file)return;
-  if(!/\.json$/i.test(file.name)){toast('请选择 .json 备份文件');return;}
+  if(!/\.json$/i.test(file.name)&&!/\.txt$/i.test(file.name)){toast('请选择 .json 备份文件');return;}
   const reader=new FileReader();
   reader.onload=()=>{
-    try{
-      const obj=JSON.parse(reader.result);
-      const d=normalizeImported(obj);
-      if(!d){toast('文件格式不正确，请确认是智能计划教练的备份');return;}
-      pendingImport=d;
-      openModal(`<h3>📤 导入数据</h3>
-        <div class="sub">将覆盖当前全部本地数据</div>
-        <div class="hint">${backupSummary(d)}</div>
-        <div class="hint">包含 plans、tasks、dailyRecords、month_plan、week_plan、changeLogs、points、titles、incentives、rewardLog、userPoints。</div>
-        <button class="btn btn-pri" data-action="confirm-import">确认覆盖并导入</button>
-        <button class="btn btn-ghost" data-action="cancel-import" style="margin-top:8px;">取消</button>`);
-    }catch(err){toast('文件格式不正确，无法解析 JSON');}
+    let obj;
+    try{obj=JSON.parse(reader.result);}
+    catch(err){
+      openModal(`<h3>导入失败</h3>
+        <div class="sub">这个文件不是合法的 JSON，当前数据没有改动。</div>
+        <div class="hint">可能丢失的内容：整份备份都没读进来。计划、任务、积分、称号和历史记录都还是现在浏览器里的这份。</div>
+        <button class="btn btn-pri" data-action="close">知道了</button>`);
+      return;
+    }
+    const result=normalizeImported(obj);
+    if(!result||!result.ok){
+      const lost=(result&&result.lost||['当前本地数据没有改动']).map(x=>esc(x)).join('<br>');
+      openModal(`<h3>导入失败</h3>
+        <div class="sub">${esc(result&&result.message||'无法识别这份备份')}</div>
+        <div class="hint">可能丢失或未写入的内容：<br>${lost}</div>
+        <button class="btn btn-pri" data-action="close">知道了</button>`);
+      return;
+    }
+    pendingImport=result.state;
+    const noteHtml=(result.notes||[]).map(x=>esc(x)).join('<br>');
+    const lostHtml=(result.lost||[]).map(x=>esc(x)).join('<br>');
+    openModal(`<h3>导入数据</h3>
+      <div class="sub">将覆盖当前全部本地数据</div>
+      <div class="hint">${backupSummary(result.state)}</div>
+      ${noteHtml?`<div class="hint">${noteHtml}</div>`:''}
+      ${lostHtml?`<div class="hint">这些内容无法完整带入：<br>${lostHtml}</div>`:'<div class="hint">计划、任务、积分、称号和每日结算都会保留。旧版没有的新字段会用默认值补上。</div>'}
+      <button class="btn btn-pri" data-action="confirm-import">确认覆盖并导入</button>
+      <button class="btn btn-ghost" data-action="cancel-import" style="margin-top:8px;">取消</button>`);
   };
-  reader.onerror=()=>toast('读取文件失败');
+  reader.onerror=()=>{
+    openModal(`<h3>导入失败</h3>
+      <div class="sub">文件没有读出来，当前数据没有改动。</div>
+      <div class="hint">可能丢失的内容：没有。浏览器里现有的计划、任务、积分和称号都还在。</div>
+      <button class="btn btn-pri" data-action="close">知道了</button>`);
+  };
   reader.readAsText(file);
 }
 
@@ -1620,6 +2134,22 @@ function render(){
   bindTaskDrag();
 }
 function statusBadge(p){const s=STATUS_MAP[p.status]||STATUS_MAP.active;return `<span class="badge ${s.cls}">${s.label}</span>`;}
+function planMetaBadges(p){
+  const mins=p.profile&&p.profile.dailyMinutes?`<span class="badge">每天 ${p.profile.dailyMinutes} 分钟</span>`:'';
+  const cat=p.category&&p.category!=='自定义'?`<span class="badge">${esc(p.category)}</span>`:'';
+  return `${statusBadge(p)}${modeBadge(p)}<span class="badge">${esc(p.cycle||'月')}计划</span>${mins}${cat}`;
+}
+function pendingBanner(){
+  const p=S.pendingNextDay;
+  if(!p)return '';
+  if(p.date<todayStr()){
+    if(S.settlements[todayStr()]){S.pendingNextDay=null;save();return '';}
+    p.date=todayStr();
+    save();
+  }
+  return `<div class="pending-banner">明日计划已写好，确认后才会放进当天。
+    <div style="margin-top:8px;"><button class="btn btn-pri btn-sm" data-action="review-next">查看并确认</button></div></div>`;
+}
 function modeBadge(p){const m=MODES[p.mode]||MODES.B;return `<span class="badge ${m.cls}">${m.label} ×${p.mode==='A'?'1.15':p.mode==='C'?'1.05':'1.1'}</span>`;}
 
 function renderHome(){
@@ -1627,7 +2157,7 @@ function renderHome(){
     $('content').innerHTML=`<div class="empty-guide">
       <div class="empty-guide-icon">🧭</div>
       <h2 class="empty-guide-title">陪你把计划跑完</h2>
-      <p class="empty-guide-desc">创建大目标后，AI 先拆成月计划与周计划，再生成每日任务。完成率会改写次日内容、难度和优先级，而不只是加减条数。</p>
+      <p class="empty-guide-desc">写下具体目标、每天能投入的时间和你的基础。教练会拆成月计划、周计划和可打勾的小任务，再按每天的完成情况和感想重排明天。</p>
       <button class="btn btn-pri" data-action="add-plan">＋ 创建第一个计划</button>
       <button class="btn btn-ghost" data-action="load-demo" style="margin-top:10px;">载入示例计划</button>
     </div>`;
@@ -1638,6 +2168,7 @@ function renderHome(){
   const rate=t.length?weightedRate(t):0;
   const pct=Math.round(rate*100);
   let html=`<div class="sec-title"><span>📅 ${cnDate(d)}</span></div>`;
+  html+=pendingBanner();
   if(S.stats.recommendRest&&!S.settlements[d]){
     html+=`<div class="rest-banner">😴 已连续 3 天加权完成率低于 50%。建议休息，恢复节奏再出发。
       <div class="btn-row" style="margin-top:10px;">
@@ -1667,7 +2198,7 @@ function renderHome(){
     html+=`<div class="card plan" style="--c:${p.color}" data-action="plan-detail" data-id="${p.id}">
       <div class="pi">
         <div class="pn">${esc(p.name)}</div>
-        <div class="pm">${statusBadge(p)}${modeBadge(p)}<span class="badge">${esc(p.cycle||'月')}计划</span><span class="badge">${esc(p.category||'')}</span></div>
+        <div class="pm">${planMetaBadges(p)}</div>
         <div class="pp">${p.status==='active'?`今日加权 ${pp}% · 强度 ${(p.intensity||1).toFixed(2)}`:('截止 '+planEndDate(p))}</div>
         ${monthGoalLine(p)}
         ${p.status==='active'?`<div class="progress"><i style="width:${pp}%"></i></div>`:''}
@@ -1689,9 +2220,15 @@ function renderToday(){
   }
   if(settled){
     const adj=(settled.adjustments||[]).map(a=>`<div class="adj-row"><span>${esc(a.name)}</span><span>${esc(a.label)}</span></div>`).join('');
-    $('content').innerHTML=`<div class="card empty"><div class="big">✅</div>今日已结算
-      <div style="margin-top:8px;font-weight:800;">加权完成率 ${Math.round(settled.rate*100)}% · +${settled.points} 积分</div>
-      ${adj?`<div style="text-align:left;margin-top:14px;">${adj}</div>`:''}
+    const df=S.dailyFeedback[d]||{};
+    $('content').innerHTML=`${pendingBanner()}<div class="card">
+      <div class="big" style="font-size:42px;text-align:center;">✅</div>
+      <div style="text-align:center;font-weight:800;">今日已结算 · 加权完成率 ${Math.round((settled.rate||0)*100)}% · +${settled.points} 积分</div>
+      ${adj?`<div style="margin-top:12px;">${adj}</div>`:''}
+      ${df.selfSummary?`<div class="hier-step">今日总结</div><div class="sum-block">${esc(df.selfSummary)}</div>`:''}
+      ${df.mood?`<div class="pp">状态：${esc(df.mood)}</div>`:''}
+      ${df.difficulties?`<div class="pp">困难：${esc(df.difficulties)}</div>`:''}
+      ${df.aiFeedback?`<div class="hint" style="margin-top:10px;">${esc(df.aiFeedback)}</div>`:''}
       <div style="margin-top:14px;"><button class="btn btn-ghost" data-action="goto-home">返回首页</button></div></div>`;
     return;
   }
@@ -1732,7 +2269,7 @@ function renderToday(){
       <button class="btn btn-warn" data-action="half-day">⚖️ 半量日</button>
       <button class="btn btn-ghost" data-action="rest">😴 完全休息</button>
     </div>
-    <div class="hint" style="margin-top:12px;margin-bottom:0;">结算后 AI 会按完成率重写次日任务（数量 / 内容 / 难度 / 优先级）。跳过的任务不计积分，但会进入次日推荐。</div>`;
+    <div class="hint" style="margin-top:12px;margin-bottom:0;">结算时先写今日总结。教练会引用完成率、任务反馈和感想，生成反馈后再请你确认明天的任务。跳过的任务不计积分。</div>`;
   $('content').innerHTML=html;
 }
 function monthGoalLine(p){
@@ -1740,19 +2277,40 @@ function monthGoalLine(p){
   if(!mp||!mp.goal)return '';
   return `<div class="pp">📅 本月：${esc(mp.goal)}</div>`;
 }
+function feedbackLine(id){
+  const fb=S.taskFeedback[id];
+  if(!fb)return '';
+  const bits=[];
+  if(fb.difficulty)bits.push(fb.difficulty);
+  if(fb.timeSpent)bits.push('实际 '+fb.timeSpent+' 分钟');
+  if(fb.feeling)bits.push(fb.feeling);
+  if(fb.problems)bits.push('问题：'+fb.problems);
+  if(!bits.length)return '';
+  return `<div class="fb-line">${esc(bits.join(' · '))}</div>`;
+}
+function subtaskHtml(t,d,locked){
+  if(!t.subtasks||!t.subtasks.length)return '';
+  return `<div class="subtasks">${t.subtasks.map(s=>`<div class="subtask ${s.done?'done':''}">
+      <button type="button" class="chk sm ${s.done?'done':''}" data-action="${locked?'':'toggle-sub'}" data-date="${d}" data-id="${t.id}" data-sub="${s.id}">${s.done?'✓':''}</button>
+      <div class="stxt">${esc(s.text)}</div>
+      ${locked?'':`<button class="mini" data-action="task-feedback" data-date="${d}" data-id="${s.id}" title="反馈">记</button>`}
+    </div>${feedbackLine(s.id)}`).join('')}</div>`;
+}
 function taskRow(t,d,opts){
   opts=opts||{};
   const st=t.status||'none';
   const settled=!!S.settlements[d];
-  const tools=opts.readOnly||settled?'':`<div class="task-tools">
+  const locked=opts.readOnly||settled;
+  const tools=locked?'':`<div class="task-tools">
+      <button class="mini" data-action="task-feedback" data-id="${t.id}" data-date="${d}" title="反馈">记</button>
       <button class="mini" data-action="edit-task" data-id="${t.id}" data-date="${d}" title="编辑">✎</button>
       ${t.skipped?'<button class="mini" data-action="unskip-task" data-id="'+t.id+'" data-date="'+d+'" title="取消跳过">↩</button>':
         '<button class="mini" data-action="skip-task" data-id="'+t.id+'" data-date="'+d+'" title="跳过">⏭</button>'}
       <button class="mini" data-action="move-task" data-dir="-1" data-id="${t.id}" data-date="${d}" title="上移">↑</button>
       <button class="mini" data-action="move-task" data-dir="1" data-id="${t.id}" data-date="${d}" title="下移">↓</button>
     </div>`;
-  return `<div class="task ${st==='done'?'done':''}${t.skipped?' skip':''}" draggable="${opts.readOnly||settled?'false':'true'}" data-tid="${t.id}" data-tdate="${d}">
-    <div class="task-top" data-action="${opts.readOnly||settled?'':'cycle-status'}" data-id="${t.id}" data-date="${d}">
+  return `<div class="task ${st==='done'?'done':''}${t.skipped?' skip':''}" draggable="${locked?'false':'true'}" data-tid="${t.id}" data-tdate="${d}">
+    <div class="task-top" data-action="${locked?'':'cycle-status'}" data-id="${t.id}" data-date="${d}">
       <div class="chk ${st}">${st==='done'?'✓':st==='partial'?'◑':t.skipped?'⏭':''}</div>
       <div class="tx"><div class="tn">${esc(t.text)}${t.skipped?' <span class="badge">已跳过</span>':''}${t.extra?' <span class="badge">临时</span>':''}</div>
         <div class="tm"><span class="badge ${t.priority==='P0'?'p0':t.priority==='P1'?'p1':'p2'}">${t.priority||'P1'}</span>
@@ -1760,7 +2318,9 @@ function taskRow(t,d,opts){
         <span class="type-tag">${esc(t.type||'其他')}</span>
         ${diffDots(t.difficulty)}</div></div>
     </div>
-    ${opts.readOnly||settled?'':`<div class="task-states">
+    ${feedbackLine(t.id)}
+    ${subtaskHtml(t,d,locked)}
+    ${locked?'':`<div class="task-states">
       <button class="st-btn ${st==='none'?'on-none':''}" data-action="set-status" data-id="${t.id}" data-date="${d}" data-st="none">未完成</button>
       <button class="st-btn ${st==='partial'?'on-partial':''}" data-action="set-status" data-id="${t.id}" data-date="${d}" data-st="partial">部分完成</button>
       <button class="st-btn ${st==='done'?'on-done':''}" data-action="set-status" data-id="${t.id}" data-date="${d}" data-st="done">完成</button>
@@ -1783,7 +2343,7 @@ function renderPlans(){
     html+=`<div class="card plan" style="--c:${p.color}">
       <div class="pi">
         <div class="pn">${esc(p.name)}</div>
-        <div class="pm">${statusBadge(p)}${modeBadge(p)}<span class="badge">${esc(p.cycle||'月')}</span><span class="badge">${esc(p.category||'')}</span></div>
+        <div class="pm">${statusBadge(p)}${modeBadge(p)}<span class="badge">${esc(p.cycle||'月')}</span>${p.profile&&p.profile.dailyMinutes?`<span class="badge">每天 ${p.profile.dailyMinutes} 分钟</span>`:''}</div>
         <div class="pp">🎯 ${esc(p.goal)}</div>
         <div class="pp">${p.createdAt} → ${planEndDate(p)} · 强度 ${(p.intensity||1).toFixed(2)}</div>
         ${p.status==='active'?`<div class="progress"><i style="width:${pp}%"></i></div>`:''}
@@ -1801,6 +2361,40 @@ function renderPlans(){
   $('content').innerHTML=html;
 }
 
+function summaryPanels(){
+  const days=[];
+  for(let i=0;i<14;i++){
+    const d=addDays(todayStr(),-i);
+    if(S.dailyFeedback[d])days.push(S.dailyFeedback[d]);
+  }
+  const weeks=Object.keys(S.weeklySummary).sort().reverse().slice(0,6);
+  const months=Object.keys(S.monthlySummary).sort().reverse().slice(0,6);
+  const dayHtml=days.length?days.map(f=>`<div class="day-block">
+      <div class="dh"><span>${cnDate(f.date)} · ${esc(f.mood||'一般')}</span></div>
+      <div class="sum-block">${esc(f.selfSummary||'未写总结')}${f.difficulties?'\n困难：'+esc(f.difficulties):''}</div>
+      ${f.aiFeedback?`<div class="hint">${esc(f.aiFeedback)}</div>`:''}
+    </div>`).join(''):'<div class="empty">结算今天后，日总结会出现在这里。</div>';
+  const weekHtml=weeks.length?weeks.map(wk=>{
+    const s=S.weeklySummary[wk];
+    return `<div class="day-block"><div class="dh"><span>${wk} 那一周</span><span>${Math.round((s.rate||0)*100)}%</span></div>
+      <div class="sum-block">${esc(s.summary||'')}</div>
+      ${s.aiFeedback?`<div class="hint">${esc(s.aiFeedback)}</div>`:'<div class="pp">反馈生成中，或点下面的按钮补写。</div>'}
+    </div>`;
+  }).join(''):'<div class="empty">跨周后会自动生成上周总结。也可以先结算几天，再手动生成本周总结。</div>';
+  const monthHtml=months.length?months.map(mk=>{
+    const s=S.monthlySummary[mk];
+    return `<div class="day-block"><div class="dh"><span>${monthLabel(mk)}</span><span>${Math.round((s.rate||0)*100)}%</span></div>
+      <div class="sum-block">${esc(s.summary||'')}</div>
+      ${s.aiFeedback?`<div class="hint">${esc(s.aiFeedback)}</div>`:''}
+    </div>`;
+  }).join(''):'<div class="empty">跨月后会自动生成上月总结。</div>';
+  return `<div class="hier-step">日总结</div><div class="card">${dayHtml}</div>
+    <div class="hier-step">周总结</div><div class="card">${weekHtml}</div>
+    <button class="btn btn-ghost btn-sm" data-action="make-week-summary" style="margin-bottom:12px;">生成本周总结</button>
+    <div class="hier-step">月总结</div><div class="card">${monthHtml}</div>
+    <button class="btn btn-ghost btn-sm" data-action="make-month-summary">生成本月总结</button>`;
+}
+
 function renderPlanDetail(){
   const p=planById(detailPlanId);
   if(!p){view='plans';renderPlans();return;}
@@ -1814,12 +2408,22 @@ function renderPlanDetail(){
     <div class="card plan" style="--c:${p.color}">
       <div class="pi">
         <div class="pn">${esc(p.name)}</div>
-        <div class="pm">${statusBadge(p)}${modeBadge(p)}<span class="badge">${esc(p.cycle)}</span><span class="badge">${esc(p.category||'')}</span></div>
+        <div class="pm">${planMetaBadges(p)}</div>
         <div class="pp">🎯 大目标：${esc(p.goal)}</div>
+        <div class="pp">${p.profile&&p.profile.foundation?'基础：'+esc(p.profile.foundation):''}</div>
         <div class="pp">${p.createdAt} → ${planEndDate(p)} · 强度 ${(p.intensity||1).toFixed(2)}</div>
       </div>
     </div>
-    <div class="hier-step">① 月计划概览 · ${monthLabel(mk)}</div>
+    <div class="plan-tabs">
+      <button class="btn ${planTab==='schedule'?'btn-pri':'btn-ghost'} btn-sm" data-action="plan-tab" data-tab="schedule">安排</button>
+      <button class="btn ${planTab==='summary'?'btn-pri':'btn-ghost'} btn-sm" data-action="plan-tab" data-tab="summary">总结</button>
+    </div>`;
+  if(planTab==='summary'){
+    html+=summaryPanels();
+    $('content').innerHTML=html;
+    return;
+  }
+  html+=`<div class="hier-step">① 月计划概览 · ${monthLabel(mk)}</div>
     <div class="card">
       <div style="font-weight:800;margin-bottom:6px;">本月目标</div>
       <div>${esc(mp.goal||p.goal)}</div>
@@ -2034,6 +2638,124 @@ function toast(msg){
 function rateTypeLabel(type){
   return type==='perfect'?'🌟 完美日':type==='target'?'✅ 达标日':type==='progress'?'📈 进步日':type==='rest'?'😴 休息日':'待提升';
 }
+function showNextDayConfirm(meta, ai, draft){
+  draft=draft||S.pendingNextDay||{plans:[]};
+  let extra='';
+  if(meta){
+    if(meta.titleUnlock)extra+=`<div class="reward"><div class="em">${meta.titleUnlock[0]}</div><div><div class="rt">解锁 ${meta.titleUnlock[1]}</div></div></div>`;
+    if(meta.achUnlock)extra+=`<div class="reward"><div class="em">🏅</div><div><div class="rt">${esc(meta.achUnlock)}</div></div></div>`;
+    if(meta.bonusHalf)extra+=`<div class="reward"><div class="em">⚖️</div><div><div class="rt">连续达标奖励</div><div class="rd">明日先按半量准备，确认后仍可改</div></div></div>`;
+    if((S.stats.consecutiveUnder||0)>=3)extra+=`<div class="rest-banner">已连续多天未达标。可以先休息，或确认一份更短的明日计划。</div>`;
+  }
+  let blocks='';
+  (draft.plans||[]).forEach(pl=>{
+    blocks+=`<div class="hier-step">${esc(pl.name)} · ${esc(pl.label||'')}</div>
+      <div class="hint">${esc(pl.reason||'')}</div>
+      <div id="draft-${pl.planId}">${(pl.specs||[]).map(taskEditRow).join('')}</div>
+      <button class="btn btn-ghost btn-sm" data-action="add-draft-row" data-id="${pl.planId}" style="margin-bottom:8px;">＋ 添加任务</button>`;
+  });
+  if(draft.rest==='full')blocks='<div class="hint">明天已是完全休息日，不会排新任务。</div>';
+  else if(!blocks)blocks='<div class="hint">没有可调整的进行中计划。</div>';
+  const head=meta?`<div class="celeb"><div class="em">${meta.rate>=.8?'🎉':'💪'}</div>
+      <h3>今日结算 · ${rateTypeLabel(meta.type)}</h3>
+      <div class="sub">加权完成率 ${Math.round(meta.rate*100)}% · +${meta.pts} 积分</div></div>`:
+    `<h3>确认计划</h3><div class="sub">${esc(draft.date||'')} 的任务还没生效</div>`;
+  openModal(`${head}
+    <div class="hint" style="text-align:left;">${esc(ai||((S.dailyFeedback[draft.from]||{}).aiFeedback)||'')}</div>
+    ${extra}
+    <div style="font-weight:800;margin:8px 0;">请确认或修改明日任务</div>
+    ${blocks}
+    <button class="btn btn-pri" data-action="confirm-next">确认采用</button>
+    <button class="btn btn-ghost" data-action="defer-next" style="margin-top:8px;">稍后确认</button>`);
+}
+function readDraftSpecs(){
+  const pending=S.pendingNextDay;
+  const out={};
+  if(!pending)return out;
+  (pending.plans||[]).forEach(pl=>{
+    const root=$('draft-'+pl.planId);
+    out[pl.planId]=root?readEditRows('draft-'+pl.planId):pl.specs;
+  });
+  return out;
+}
+function applyPendingNextDay(){
+  const pending=S.pendingNextDay;
+  if(!pending){toast('没有待确认的计划');return;}
+  if(S.settlements[pending.date]){toast('这一天已经结算，不能覆盖');return;}
+  const specsByPlan=readDraftSpecs();
+  (pending.plans||[]).forEach(pl=>{
+    const p=planById(pl.planId);if(!p)return;
+    const specs=specsByPlan[pl.planId]&&specsByPlan[pl.planId].length?specsByPlan[pl.planId]:pl.specs;
+    replacePlanDayTasks(p,pending.date,specs,{keepUser:false,source:'confirmed'});
+  });
+  S.pendingNextDay=null;
+  save();
+  closeModal();
+  render();
+  toast('计划已采用，之后仍可修改每一项');
+}
+function openDailySummary(){
+  const d=todayStr();
+  if(S.settlements[d]){toast('今日已经结算过了');return;}
+  const tasks=todayTasks(d);
+  const rate=tasks.length?weightedRate(tasks):1;
+  const digest=collectDayFeedbackDigest(d);
+  openModal(`<h3>📝 今日总结</h3>
+    <div class="sub">加权完成率 ${Math.round(rate*100)}% · 写完后再生成明日计划</div>
+    <div class="field"><label>今日自我总结</label><textarea id="dfSum" rows="3" placeholder="今天推进了什么，哪里做得好"></textarea></div>
+    <div class="field"><label>今日状态</label>
+      <div class="seg" id="dfMood">
+        <button type="button" data-action="pick-mood" data-mood="好">好</button>
+        <button type="button" data-action="pick-mood" data-mood="一般" class="sel">一般</button>
+        <button type="button" data-action="pick-mood" data-mood="差">差</button>
+      </div></div>
+    <div class="field"><label>遇到的困难</label><textarea id="dfDiff" rows="2" placeholder="例如：公式推导卡住、训练动作不稳"></textarea></div>
+    <div class="hint" style="text-align:left;white-space:pre-wrap;">已收集的任务反馈：\n${esc(digest==='无'?'还没有单条反馈，也可以直接总结':digest)}</div>
+    <button class="btn btn-pri" id="submitDay">生成反馈并安排明天</button>
+    <button class="btn btn-ghost" data-action="close" style="margin-top:8px;">取消</button>`);
+  $('submitDay').onclick=()=>{
+    const moodBtn=$('dfMood').querySelector('.sel');
+    settleDay({
+      selfSummary:$('dfSum').value.trim(),
+      mood:moodBtn?moodBtn.dataset.mood:'一般',
+      difficulties:$('dfDiff').value.trim()
+    });
+  };
+}
+function openTaskFeedback(date,id){
+  const found=findTask(date,id);
+  if(!found){toast('找不到这条任务');return;}
+  const label=found.sub?found.sub.text:found.task.text;
+  const fb=S.taskFeedback[id]||{};
+  const mood=(v,cur)=>`<button type="button" data-action="pick-hard" data-v="${v}" class="${(fb.difficulty||'适中')===v?'sel':''}">${v}</button>`;
+  openModal(`<h3>任务反馈</h3><div class="sub">${esc(label)}</div>
+    <div class="field"><label>过程感想（选填）</label><textarea id="fbFeel" rows="2" placeholder="做的时候发生了什么">${esc(fb.feeling||'')}</textarea></div>
+    <div class="field"><label>实际花费时间（分钟，选填）</label><input id="fbTime" inputmode="numeric" value="${escapeAttr(fb.timeSpent||'')}" placeholder="例如 25"></div>
+    <div class="field"><label>难度感受</label><div class="seg" id="fbHard">${mood('简单')}${mood('适中')}${mood('困难')}</div></div>
+    <div class="field"><label>遇到的问题（选填）</label><textarea id="fbProb" rows="2" placeholder="卡在哪一步">${esc(fb.problems||'')}</textarea></div>
+    <button class="btn btn-pri" id="fbSave">保存反馈</button>
+    <button class="btn btn-ghost" id="fbSkip" style="margin-top:8px;">先不写</button>`);
+  const finish=showRec=>{
+    closeModal();
+    const rec=pendingRecommend;pendingRecommend=null;
+    if(showRec&&rec)showIncentiveRecommend(rec);
+    render();
+  };
+  $('fbSave').onclick=()=>{
+    const hard=$('fbHard').querySelector('.sel');
+    S.taskFeedback[id]={
+      taskId:id,
+      feeling:$('fbFeel').value.trim(),
+      timeSpent:String($('fbTime').value||'').replace(/[^\d]/g,''),
+      difficulty:hard?hard.dataset.v:'适中',
+      problems:$('fbProb').value.trim()
+    };
+    save();
+    toast('反馈已记下，会用于次日调整');
+    finish(true);
+  };
+  $('fbSkip').onclick=()=>finish(true);
+}
 function showDailySettlement(r){
   const adj=(r.adjustments||[]).map(a=>`<div class="adj-row"><span>${esc(a.name)}</span><span>${esc(a.label)}</span></div>`).join('')
     ||'<div class="sub">没有可调整的进行中计划</div>';
@@ -2070,6 +2792,8 @@ function showPeriodCelebration(o){
   const title=o.kind==='week'?weekName:monthName;
   let body=o.title?`<div class="reward"><div class="em">${o.title[0]}</div><div><div class="rt">解锁称号：${o.title[1]}</div></div></div>`:'';
   if(o.pts)body+=`<div class="reward"><div class="em">⭐</div><div><div class="rt">+${o.pts} 积分</div><div class="rd">累计 ${S.points}</div></div></div>`;
+  if(o.summary)body+=`<div class="hint" style="text-align:left;">${esc(o.summary)}</div>`;
+  body+=`<div id="periodAI" class="hint" style="text-align:left;">正在根据完成数据和感想写${o.kind==='week'?'周':'月'}反馈...</div>`;
   openModal(`<div class="celeb"><div class="em">${o.kind==='week'?'👑':'🏆'}</div>
     <h3>${title}</h3><div class="sub">平均完成率 ${avgP}%</div>${body}
     <button class="btn btn-pri" data-action="close">继续</button></div>`);
@@ -2081,17 +2805,16 @@ function desktopInfo(){
 }
 
 function openSettings(){
-  const hasFileKey=!!DEEPSEEK_API_KEY;
   const desk=desktopInfo();
   let dataPath='';
   try{if(desk&&desk.getUserDataPath)dataPath=desk.getUserDataPath()||'';}catch(e){}
   const dataHint=dataPath
     ?`<div class="hint" style="margin-top:10px;">桌面版数据目录：<br><code style="word-break:break-all;">${escapeAttr(dataPath)}</code><br>默认在当前用户目录。若要改到 E 盘，把安装目录下的 app-config.example.json 复制为 app-config.json，写入例如 E:\\SmartPlanCoach\\data 后重启。</div>`
     :'';
-  const apiHint=`<div class="hint">也可在 index.html 顶部填写 DEEPSEEK_API_KEY。未配置或调用失败时自动使用本地模板。浏览器直连可能受跨域限制。</div>`;
-  openModal(`<h3>⚙ 设置</h3><div class="sub">DeepSeek API 用于拆解任务与激励语</div>
+  const apiHint=`<div class="hint">API Key 只保存在本机设置里，不会写进安装包。未填写或调用失败时，会按你写下的目标生成草案。在浏览器中直接调用时若遇到跨域限制，可填写代理地址。</div>`;
+  openModal(`<h3>⚙ 设置</h3><div class="sub">DeepSeek 用来理解目标、重排明天，并写日/周/月反馈。请在下方自行填写 API Key。</div>
     <div class="field"><label>DeepSeek API Key</label>
-      <input id="sKey" type="password" placeholder="${hasFileKey?'已在脚本中配置，可在此覆盖':'sk-...'}" value="${escapeAttr(S.settings.apiKey||'')}"></div>
+      <input id="sKey" type="password" placeholder="sk-..." value="${escapeAttr(S.settings.apiKey||'')}"></div>
     <div class="field"><label>代理地址（可选）</label>
       <input id="sProxy" placeholder="无 Key 直连失败时可用代理转发" value="${escapeAttr(S.settings.proxyUrl||'')}"></div>
     ${apiHint}
@@ -2123,49 +2846,56 @@ function clearAllAppData(){
 }
 
 function openPlanModal(){
-  openModal(`<h3>🤖 AI 分层拆解</h3><div class="sub">先拆月计划，再生成周任务与今日安排</div>
-    <div class="field"><label>计划名称</label><input id="pName" placeholder="如：30天减脂计划"></div>
+  openModal(`<h3>🎯 按你的目标定制计划</h3><div class="sub">不选类别。写下目标、时间和基础，再拆成月 / 周 / 日</div>
+    <div class="field"><label>计划名称（可选）</label><input id="pName" placeholder="如：CFA一级，90天"></div>
+    <div class="field"><label>具体目标</label><textarea id="pGoal" rows="3" placeholder="例如：三个月通过CFA一级考试，或一个月减重5斤"></textarea></div>
+    <div class="field"><label>每天能投入的时间（分钟）</label><input id="pMins" inputmode="numeric" value="90" placeholder="90"></div>
+    <div class="field"><label>当前基础</label><textarea id="pBase" rows="2" placeholder="例如：金融零基础，每天晚上才有空；或目前体重140斤，膝盖不能跑"></textarea></div>
+    <div class="field"><label>偏好的学习 / 执行方式（可选）</label><input id="pPref" placeholder="例如：先做题再看书，或跟练视频"></div>
     <div class="field"><label>计划周期</label>
       <select id="pCycle"><option>日</option><option>周</option><option selected>月</option><option>半年</option><option>一年</option></select></div>
-    <div class="field"><label>大目标描述</label><textarea id="pGoal" rows="2" placeholder="如：每周跑步3次，体脂降到18%"></textarea></div>
-    <div class="field"><label>分类</label>
-      <select id="pCat"><option>健身</option><option>学习</option><option>工作</option><option>其他</option></select></div>
     <div class="field"><label>挑战模式</label>
       <div class="seg" id="pMode">
         <button type="button" data-m="A">激进<br><small>×1.15</small></button>
         <button type="button" data-m="B" class="sel">稳健<br><small>×1.1</small></button>
         <button type="button" data-m="C">保守<br><small>×1.05</small></button>
       </div></div>
-    <div class="hint">AI 会生成月目标 → 周主题 → 每日任务。结算后按完成率改写次日内容、难度和优先级。</div>
-    <button class="btn btn-pri" id="genPlan">✨ AI 分层拆解</button>
-    <button class="btn btn-ghost btn-sm" id="manualPlan" style="margin-top:8px;">不用 AI，手动编辑</button>
+    <div class="hint">任务会写成可打勾的小步骤，例如读完某一章并做完若干题。没有 API Key 时，也会按你的目标生成草案，而不是套用学习/健身模板。</div>
+    <button class="btn btn-pri" id="genPlan">✨ 生成专属计划</button>
+    <button class="btn btn-ghost btn-sm" id="manualPlan" style="margin-top:8px;">先看本地草案再改</button>
     <button class="btn btn-ghost" data-action="close" style="margin-top:8px;">取消</button>`);
   let mode='B';
   $('modal').querySelectorAll('#pMode button').forEach(btn=>btn.addEventListener('click',()=>{
     $('modal').querySelectorAll('#pMode button').forEach(b=>b.classList.remove('sel'));
     btn.classList.add('sel');mode=btn.dataset.m;
   }));
-  const readForm=()=>({
-    name:$('pName').value.trim(),
-    goal:$('pGoal').value.trim(),
-    cycle:$('pCycle').value,
-    cat:$('pCat').value
-  });
+  const readForm=()=>{
+    const goal=$('pGoal').value.trim();
+    const name=$('pName').value.trim()||goal.slice(0,24);
+    const profile={
+      dailyMinutes:Math.max(15,parseInt($('pMins').value,10)||60),
+      foundation:$('pBase').value.trim(),
+      preference:$('pPref').value.trim()
+    };
+    return {name,goal,cycle:$('pCycle').value,profile};
+  };
+  const buildDraft=f=>{
+    return {id:'draft',name:f.name,goal:f.goal,category:'自定义',mode,cycle:f.cycle,intensity:1,profile:f.profile,templates:[],ms:[],month_plan:{},week_plan:{}};
+  };
   $('genPlan').onclick=async()=>{
     const f=readForm();
-    const name=f.name||f.goal;const goal=f.goal||f.name;
-    if(!name){toast('请填写计划名称或目标');return;}
-    const draft={id:'draft',name,goal,category:f.cat,mode,cycle:f.cycle,intensity:1,templates:pickTemplates(goal),ms:milestones(goal),month_plan:{},week_plan:{}};
-    openModal(`<div class="ai-loading"><div class="loading-em">🤖</div><h3>正在拆解月计划</h3>
-      <div class="sub">把「${esc(name)}」拆成月目标与周主题</div></div>`);
+    if(!f.goal){toast('请先写下具体目标');return;}
+    const draft=buildDraft(f);
+    openModal(`<div class="ai-loading"><div class="loading-em">🤖</div><h3>正在理解你的目标</h3>
+      <div class="sub">${esc(f.goal)}</div></div>`);
     const mk=monthKey(todayStr());
     const wk=weekKey(todayStr());
     let usedFallback=false;
     try{
       draft.month_plan[mk]=await generateMonthPlanWithAI(draft,mk);
       usedFallback=usedFallback||!!lastAIFallback;
-      openModal(`<div class="ai-loading"><div class="loading-em">🤖</div><h3>正在生成本周任务</h3>
-        <div class="sub">${esc((draft.month_plan[mk].weekThemes[0]||{}).theme||'本周推进')}</div></div>`);
+      openModal(`<div class="ai-loading"><div class="loading-em">🤖</div><h3>正在拆每天的具体任务</h3>
+        <div class="sub">大约每天 ${f.profile.dailyMinutes} 分钟</div></div>`);
       draft.week_plan[wk]=await generateWeekPlanWithAI(draft,wk,{rate:null,skipped:'无'});
       usedFallback=usedFallback||!!lastAIFallback;
     }catch(e){
@@ -2174,22 +2904,24 @@ function openPlanModal(){
       draft.week_plan[wk]=fallbackWeekPlan(draft,wk,0.7);
     }
     const todayTasks=(draft.week_plan[wk].dayPlans[todayStr()]||fallbackDaySpecs(draft,todayStr(),0.7));
-    showHierarchyDraft(name,goal,f.cat,mode,f.cycle,draft.month_plan,draft.week_plan,todayTasks,usedFallback);
+    showHierarchyDraft(Object.assign({mode},f),draft.month_plan,draft.week_plan,todayTasks,usedFallback);
   };
   $('manualPlan').onclick=()=>{
     const f=readForm();
-    const name=f.name||f.goal||'我的计划';const goal=f.goal||name;
-    const draft={name,goal,category:f.cat,templates:pickTemplates(goal),ms:milestones(goal),intensity:1,cycle:f.cycle};
+    if(!f.goal){toast('请先写下具体目标');return;}
+    const draft=buildDraft(f);
     const mk=monthKey(todayStr());const wk=weekKey(todayStr());
     const month_plan={[mk]:fallbackMonthPlan(draft,mk)};
     const week_plan={[wk]:fallbackWeekPlan(draft,wk,0.7)};
-    showHierarchyDraft(name,goal,f.cat,mode,f.cycle,month_plan,week_plan,week_plan[wk].dayPlans[todayStr()],true);
+    showHierarchyDraft(Object.assign({mode},f),month_plan,week_plan,week_plan[wk].dayPlans[todayStr()],true);
   };
 }
 function taskEditRow(t){
-  t=t||{name:'',minutes:'20',priority:'P1',difficulty:3,type:'其他'};
+  t=t||{name:'',minutes:'20',priority:'P1',difficulty:3,type:'其他',subtasks:[]};
   const types=TASK_TYPES.map(tp=>`<option ${t.type===tp?'selected':''}>${tp}</option>`).join('');
-  return `<div class="edit-row">
+  const subs=Array.isArray(t.subtasks)?t.subtasks.map(s=>typeof s==='string'?s:(s.text||'')).filter(Boolean).join('；'):'';
+  return `<div class="task-edit">
+    <div class="edit-row">
     <input class="er-input" value="${escapeAttr(t.name||t.text||'')}">
     <input class="er-input er-min" value="${escapeAttr(String(t.minutes||30))}" placeholder="分钟">
     <select class="er-input er-pri"><option ${t.priority==='P0'?'selected':''}>P0</option>
@@ -2197,39 +2929,50 @@ function taskEditRow(t){
       <option ${t.priority==='P2'?'selected':''}>P2</option></select>
     <select class="er-input er-pri er-diff">${[1,2,3,4,5].map(n=>`<option ${clampDiff(t.difficulty)===n?'selected':''}>${n}</option>`).join('')}</select>
     <select class="er-input er-pri">${types}</select>
-    <button type="button" class="er-del">×</button></div>`;
+    <button type="button" class="er-del" data-action="del-edit-row">×</button></div>
+    <input class="er-input er-subs" placeholder="子项用；分隔，每一项可单独打勾" value="${escapeAttr(subs)}">
+  </div>`;
 }
 function readEditRows(rootId){
-  return [...$(rootId).querySelectorAll('.edit-row')].map(r=>{
+  const root=$(rootId);if(!root)return [];
+  return [...root.querySelectorAll('.task-edit')].map(r=>{
     const inp=r.querySelectorAll('input');const sel=r.querySelectorAll('select');
+    const subtasks=(inp[2]?inp[2].value:'').split(/[;；]/).map(s=>s.trim()).filter(Boolean);
     return {
       name:inp[0].value.trim(),
       minutes:(inp[1].value.replace(/[^\d]/g,'')||'20'),
       priority:sel[0].value,
       difficulty:clampDiff(sel[1]&&sel[1].value),
-      type:(sel[2]&&sel[2].value)||'其他'
+      type:(sel[2]&&sel[2].value)||'其他',
+      subtasks
     };
   }).filter(t=>t.name);
 }
-function showHierarchyDraft(name,goal,cat,mode,cycle,month_plan,week_plan,todayTasks,fallback){
+function showHierarchyDraft(form,month_plan,week_plan,todayTasks,fallback){
+  const name=form.name, goal=form.goal, mode=form.mode||'B', cycle=form.cycle, profile=form.profile;
   const mk=monthKey(todayStr());const wk=weekKey(todayStr());
-  const mp=month_plan[mk]||fallbackMonthPlan({name,goal,ms:milestones(goal)},mk);
+  const mp=month_plan[mk]||fallbackMonthPlan({name,goal,profile,ms:[]},mk);
   const themes=(mp.weekThemes||[]).map((w,i)=>`<div class="rule"><span>W${i+1} ${esc(w.theme||'')}</span><span style="color:var(--sub);">${esc(w.focus||'')}</span></div>`).join('');
-  openModal(`<h3>📝 确认分层计划</h3>
-    <div class="sub">${fallback?'当前使用本地模板，可自由改':'AI 已拆成月 → 周 → 日，可改后再创建'}</div>
+  openModal(`<h3>确认这套计划</h3>
+    <div class="sub">${fallback?'这是按你的目标生成的本地草案，改完再创建':'已按你的目标拆好，改完再创建'}</div>
     <div class="field"><label>本月目标</label><textarea id="dMonthGoal" rows="2">${esc(mp.goal||goal)}</textarea></div>
     <div class="field"><label>本月重点</label><input id="dMonthFocus" value="${escapeAttr(mp.focus||'')}"></div>
     <div class="card" style="box-shadow:none;padding:10px;">${themes||'—'}</div>
-    <div class="hier-step">今日任务</div>
+    <div class="hier-step">今日任务 · 约 ${profile.dailyMinutes} 分钟</div>
     <div id="dailies">${(todayTasks||[]).map(taskEditRow).join('')}</div>
     <button class="btn btn-ghost btn-sm" id="addDay">＋ 添加任务</button>
-    <div class="hint">每行：内容 · 分钟 · 优先级 · 难度1-5 · 类型。结算后 AI 会改写次日，而不只改条数。</div>
+    <div class="hint">每条任务下面的子项用分号分开，创建后可以单独打勾。</div>
     <div class="btn-row" style="margin-top:8px;">
       <button class="btn btn-ghost" id="backStep">← 返回</button>
-      <button class="btn btn-pri" id="confirmPlan">✅ 创建计划</button>
+      <button class="btn btn-pri" id="confirmPlan">创建计划</button>
     </div>`);
-  $('addDay').onclick=()=>$('dailies').insertAdjacentHTML('beforeend',taskEditRow({name:'',minutes:'20',priority:'P1',difficulty:3,type:cat==='健身'?'运动':cat==='学习'?'学习':cat==='工作'?'工作':'其他'}));
-  $('modal').addEventListener('click',e=>{if(e.target.classList.contains('er-del'))e.target.closest('.edit-row').remove();});
+  $('addDay').onclick=()=>$('dailies').insertAdjacentHTML('beforeend',taskEditRow({name:'',minutes:'20',priority:'P1',difficulty:3,type:'其他',subtasks:[]}));
+  $('modal').addEventListener('click',e=>{
+    if(e.target.classList.contains('er-del')){
+      const box=e.target.closest('.task-edit');
+      if(box)box.remove();
+    }
+  });
   $('backStep').onclick=()=>openPlanModal();
   $('confirmPlan').onclick=()=>{
     const rows=readEditRows('dailies');
@@ -2241,10 +2984,9 @@ function showHierarchyDraft(name,goal,cat,mode,cycle,month_plan,week_plan,todayT
       week_plan[wk].dayPlans=week_plan[wk].dayPlans||{};
       week_plan[wk].dayPlans[todayStr()]=rows;
     }
-    createPlan(name,cat,mode,goal,rows,undefined,cycle,{month_plan,week_plan});
+    createPlan(name,'自定义',mode,goal,rows,undefined,cycle,{month_plan,week_plan,profile});
     closeModal();view='today';render();
-    toast('计划已创建，开始今天的执行');
-    syncHierarchy(todayStr()).then(()=>{if(view==='today')render();});
+    toast('计划已创建。今天的小项可以单独打勾');
   };
 }
 function openPlanDetail(id){
@@ -2326,6 +3068,7 @@ function openEditTask(date,id){
     <div class="field"><label>难度（1-5）</label>
       <select id="eDiff">${[1,2,3,4,5].map(n=>`<option ${clampDiff(t.difficulty)===n?'selected':''}>${n}</option>`).join('')}</select></div>
     <div class="field"><label>类型</label><select id="eType">${types}</select></div>
+    <div class="field"><label>子项（用；分隔，可单独打勾）</label><input id="eSubs" value="${escapeAttr((t.subtasks||[]).map(s=>s.text).join('；'))}"></div>
     <button class="btn btn-pri" id="eSave">保存</button>
     <button class="btn btn-ghost" data-action="close" style="margin-top:8px;">取消</button>`);
   $('eSave').onclick=()=>{
@@ -2335,6 +3078,10 @@ function openEditTask(date,id){
     t.priority=$('ePri').value;
     t.difficulty=clampDiff($('eDiff').value);
     t.type=$('eType').value;
+    t.subtasks=$('eSubs').value.split(/[;；]/).map(s=>s.trim()).filter(Boolean).map(text=>{
+      const old=(t.subtasks||[]).find(x=>x.text===text);
+      return {id:old?old.id:uid(),text,done:old?!!old.done:false};
+    });
     t.source='user';
     syncSpecFromTask(t);
     logChange(date,{action:'edit',planId:t.planId,taskId:t.id,text:t.text,detail:'由 '+from+' 改为 '+t.text+' / '+t.minutes+' / '+t.priority});
@@ -2347,7 +3094,7 @@ function syncSpecFromTask(t){
   const wk=weekKey(t.date);
   if(!p.week_plan[wk])p.week_plan[wk]=fallbackWeekPlan(p,wk,0.7);
   const specs=(S.tasks[t.date]||[]).filter(x=>x.planId===t.planId).sort((a,b)=>(a.order||0)-(b.order||0))
-    .map(x=>({name:x.text,minutes:x.minutes,priority:x.priority,difficulty:x.difficulty,type:x.type}));
+    .map(x=>({name:x.text,minutes:x.minutes,priority:x.priority,difficulty:x.difficulty,type:x.type,subtasks:(x.subtasks||[]).map(s=>({id:s.id,text:s.text,done:!!s.done}))}));
   p.week_plan[wk].dayPlans=p.week_plan[wk].dayPlans||{};
   p.week_plan[wk].dayPlans[t.date]=specs;
 }
@@ -2439,19 +3186,33 @@ async function rebuildMonthFromNow(p){
   await rebuildRemainingWeek(p,weekKey(todayStr()));
 }
 
-function setTaskStatus(date,id,st){
+function setTaskStatus(date,id,st,opt){
   const t=(S.tasks[date]||[]).find(x=>x.id===id);if(!t)return;
   if(t.skipped&&st!=='none')t.skipped=false;
   const wasDone=(t.status||'none')==='done';
   t.status=st;t.done=st==='done';
+  if(st==='done')(t.subtasks||[]).forEach(s=>{s.done=true;});
+  if(st==='none')(t.subtasks||[]).forEach(s=>{s.done=false;});
+  const ask=!opt||!opt.silent;
+  if(t.done&&!wasDone)onTaskCompletedChange(t,true,{deferRecommend:ask&&(st==='done'||st==='partial')});
+  else if(wasDone&&!t.done)onTaskCompletedChange(t,false);
   save();
-  if(t.done&&!wasDone){
-    if(navigator.vibrate)try{navigator.vibrate(18);}catch(e){}
-    onTaskCompletedChange(t,true);
-  }else if(wasDone&&!t.done){
-    onTaskCompletedChange(t,false);
-  }
   render();
+  if(ask&&(st==='done'||st==='partial'))openTaskFeedback(date,id);
+}
+function toggleSubtask(date,taskId,subId){
+  const t=(S.tasks[date]||[]).find(x=>x.id===taskId);if(!t||S.settlements[date])return;
+  const s=(t.subtasks||[]).find(x=>x.id===subId);if(!s)return;
+  s.done=!s.done;
+  const doneN=(t.subtasks||[]).filter(x=>x.done).length;
+  const all=(t.subtasks||[]).length;
+  const next=doneN===0?'none':doneN===all?'done':'partial';
+  const wasDone=(t.status||'none')==='done';
+  t.status=next;t.done=next==='done';t.skipped=false;
+  if(next==='done'&&!wasDone)onTaskCompletedChange(t,true,{deferRecommend:true});
+  else if(wasDone&&next!=='done')onTaskCompletedChange(t,false);
+  save();render();
+  if(s.done)openTaskFeedback(date,subId);
 }
 function cycleTaskStatus(date,id){
   const t=(S.tasks[date]||[]).find(x=>x.id===id);if(!t)return;
@@ -2461,18 +3222,14 @@ function cycleTaskStatus(date,id){
 
 function loadDemo(){
   if(S.plans.length){toast('已有计划，示例未载入');return;}
-  const seed=(name,cat,mode,goal,cycle)=>{
-    const draft={name,goal,category:cat,templates:pickTemplates(goal),ms:milestones(goal),intensity:1,cycle};
-    const mk=monthKey(todayStr());const wk=weekKey(todayStr());
-    const month_plan={[mk]:fallbackMonthPlan(draft,mk)};
-    const week_plan={[wk]:fallbackWeekPlan(draft,wk,0.7)};
-    const todaySpecs=week_plan[wk].dayPlans[todayStr()];
-    createPlan(name,cat,mode,goal,todaySpecs,undefined,cycle,{month_plan,week_plan});
-  };
-  seed('30天健身减脂','健身','A','每周跑步3次并力量训练','月');
-  seed('每日英语学习','学习','B','雅思阅读提分','月');
-  seed('产品上线冲刺','工作','C','完成核心功能并上线','周');
-  toast('已载入 3 个示例计划（含月/周分层）');
+  const goal='三个月通过CFA一级考试';
+  const profile={dailyMinutes:90,foundation:'金融零基础，只能晚上学习',preference:'先做题再回看书'};
+  const draft={name:'CFA一级',goal,category:'自定义',profile,intensity:1,cycle:'月'};
+  const mk=monthKey(todayStr());const wk=weekKey(todayStr());
+  const month_plan={[mk]:fallbackMonthPlan(draft,mk)};
+  const week_plan={[wk]:fallbackWeekPlan(draft,wk,0.7)};
+  createPlan('CFA一级','自定义','B',goal,week_plan[wk].dayPlans[todayStr()],undefined,'月',{month_plan,week_plan,profile});
+  toast('已载入一份按目标生成的示例计划');
   view='today';render();
 }
 
@@ -2486,10 +3243,7 @@ document.addEventListener('click',e=>{
   if(a==='goto-plans'){view='plans';render();return;}
   if(a==='add-plan'){openPlanModal();return;}
   if(a==='open-settings'){openSettings();return;}
-  if(a==='settle'){
-    if(!confirm('确认结算今日？结算后不可再改任务状态。'))return;
-    settleDay();return;
-  }
+  if(a==='settle'){openDailySummary();return;}
   if(a==='rest'){
     if(!confirm('开启完全休息日？今日任务将清空且不计入完成率。'))return;
     restDay();return;
@@ -2498,6 +3252,62 @@ document.addEventListener('click',e=>{
   if(a==='load-demo'){loadDemo();return;}
   if(a==='set-status'){setTaskStatus(el.dataset.date,el.dataset.id,el.dataset.st);return;}
   if(a==='cycle-status'){cycleTaskStatus(el.dataset.date,el.dataset.id);return;}
+  if(a==='toggle-sub'){toggleSubtask(el.dataset.date,el.dataset.id,el.dataset.sub);return;}
+  if(a==='task-feedback'){openTaskFeedback(el.dataset.date,el.dataset.id);return;}
+  if(a==='plan-tab'){planTab=el.dataset.tab||'schedule';render();return;}
+  if(a==='pick-mood'||a==='pick-hard'){
+    const box=el.parentElement;
+    if(box)box.querySelectorAll('button').forEach(b=>b.classList.remove('sel'));
+    el.classList.add('sel');
+    return;
+  }
+  if(a==='confirm-next'){applyPendingNextDay();return;}
+  if(a==='defer-next'){closeModal();render();toast('明日计划已保存，可稍后确认');return;}
+  if(a==='review-next'){
+    const draft=S.pendingNextDay;
+    if(!draft){toast('没有待确认的计划');return;}
+    const df=S.dailyFeedback[draft.from]||{};
+    showNextDayConfirm(null, df.aiFeedback||'', draft);
+    return;
+  }
+  if(a==='del-edit-row'){const box=el.closest('.task-edit');if(box)box.remove();return;}
+  if(a==='add-draft-row'){
+    const box=$('draft-'+el.dataset.id);
+    if(box)box.insertAdjacentHTML('beforeend',taskEditRow({name:'',minutes:'15',priority:'P1',difficulty:2,type:'其他',subtasks:[]}));
+    return;
+  }
+  if(a==='make-week-summary'){
+    (async()=>{
+      const wk=weekKey(todayStr());
+      const has=weekDates(wk).some(d=>S.settlements[d]&&!S.settlements[d].rest);
+      if(!has){toast('本周还没有结算记录');return;}
+      const pack=buildWeeklySummary(wk);
+      openModal(`<div class="ai-loading"><div class="loading-em">📝</div><h3>正在写本周反馈</h3></div>`);
+      S.weeklySummary[wk]=pack;
+      await fillPeriodFeedback('week',wk);
+      closeModal();
+      planTab='summary';
+      render();
+      toast('本周总结已更新');
+    })();
+    return;
+  }
+  if(a==='make-month-summary'){
+    (async()=>{
+      const mk=monthKey(todayStr());
+      const pack=buildMonthlySummary(mk);
+      const has=datesOfMonth(mk).some(d=>S.settlements[d]&&!S.settlements[d].rest);
+      if(!has){toast('本月还没有结算记录');return;}
+      openModal(`<div class="ai-loading"><div class="loading-em">📝</div><h3>正在写本月反馈</h3></div>`);
+      S.monthlySummary[mk]=pack;
+      await fillPeriodFeedback('month',mk);
+      closeModal();
+      planTab='summary';
+      render();
+      toast('本月总结已更新');
+    })();
+    return;
+  }
   if(a==='plan-detail'){openPlanDetail(el.dataset.id);return;}
   if(a==='toggle-week'){expandedWeek=expandedWeek===el.dataset.wk?'':el.dataset.wk;render();return;}
   if(a==='edit-task'){openEditTask(el.dataset.date,el.dataset.id);return;}
@@ -2619,10 +3429,19 @@ document.addEventListener('input',e=>{
     checkPeriod(todayStr());
     ensureToday();
     render();
+    if(Array.isArray(S._importNotes)&&S._importNotes.length){
+      const lines=S._importNotes.slice();
+      S._importNotes=[];
+      save();
+      openModal(`<h3>备份已导入</h3>
+        <div class="sub">旧版字段已做兼容，下面是处理说明。</div>
+        <div class="hint">${lines.map(x=>esc(x)).join('<br>')}</div>
+        <button class="btn btn-pri" data-action="close">去查看</button>`);
+    }
     syncHierarchy(todayStr()).then(function(){render();}).catch(function(){});
   }catch(e){
     console.warn('初始化失败',e);
-    try{toast('初始化失败，可在设置中清空数据后重试');}catch(err){}
+    try{toast('初始化失败。若刚导入备份，部分计划或任务可能无法显示。可在「数据」页重新导入；当前已显示的内容不一定完整。');}catch(err){}
   }
 })();
 </script>
